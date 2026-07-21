@@ -37,6 +37,21 @@ class ApprovalBoundaryTest(unittest.TestCase):
         self.assertNotIn("submit_btn.click", source)
         self.assertIn("add_pending_job", source)
 
+    def test_search_uses_moscow_and_remote_modes(self) -> None:
+        source = async_function_source(ROOT / "hh_client.py", "search_and_queue")
+
+        self.assertIn('"&area=1"', source)
+        self.assertIn('"&area=113&schedule=remote"', source)
+        self.assertNotIn('"&area=2"', source)
+
+    def test_search_targets_senior_experience(self) -> None:
+        source = async_function_source(ROOT / "hh_client.py", "search_and_queue")
+
+        self.assertIn("experience=between3And6", source)
+        self.assertIn("experience=moreThan6", source)
+        self.assertNotIn("experience=noExperience", source)
+        self.assertNotIn("experience=between1And3", source)
+
     def test_ollama_outage_stops_search_without_filtering_current_job(self) -> None:
         source = async_function_source(ROOT / "hh_client.py", "search_and_queue")
 
@@ -56,6 +71,12 @@ class ApprovalBoundaryTest(unittest.TestCase):
         self.assertIn("submit_btn.click", source)
         self.assertIn("mark_job_applied", source)
         self.assertIn("restore_pending_job", source)
+
+    def test_application_tries_configured_resumes_in_order(self) -> None:
+        source = async_function_source(ROOT / "hh_client.py", "apply_pending_job")
+
+        self.assertIn("for target_resume_name in TARGET_RESUME_NAMES", source)
+        self.assertIn("selected_resume", source)
 
     def test_telegram_apply_button_calls_only_configured_handler(self) -> None:
         source = async_function_source(ROOT / "tg_bot.py", "apply_job")

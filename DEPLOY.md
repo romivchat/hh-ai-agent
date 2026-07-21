@@ -121,20 +121,20 @@ TG_USER_ID="ВАШ_TELEGRAM_ID"
 MAX_PENDING_JOBS="10"
 HH_SUBMISSION_ENABLED="false"
 OLLAMA_URL="http://localhost:11434/api/generate"
-OLLAMA_MODEL="qwen2.5:1.5b-instruct"
+OLLAMA_MODEL="qwen3:4b-instruct"
 APPLICANT_NAME="ИМЯ_ДЛЯ_ПОДПИСИ"
 GITHUB_URL="https://github.com/romivchat"
-TARGET_RESUME_NAME="ТОЧНОЕ_НАЗВАНИЕ_РЕЗЮМЕ_НА_HH"
+TARGET_RESUME_NAMES="PRODUCT_MANAGER|PRODUCT_OWNER|CPO"
 MY_RESUME_SUMMARY="ОПЫТ_НАВЫКИ_ПРОЕКТЫ_И_ПОЖЕЛАНИЯ"
 ```
 
 На этапе настройки `HH_SUBMISSION_ENABLED` должен оставаться `false`.
 
-Данные автора исходного проекта удалены из шаблона. Перед запуском обязательно заполнить `APPLICANT_NAME`, `TARGET_RESUME_NAME` и `MY_RESUME_SUMMARY`. Поисковые запросы `SEARCH_QUERIES` при необходимости меняются в `config.py`.
+Данные автора исходного проекта удалены из шаблона. Перед запуском обязательно заполнить `APPLICANT_NAME`, `TARGET_RESUME_NAMES` и `MY_RESUME_SUMMARY`. Названия резюме разделяются символом `|`; бот выбирает первое найденное. Поисковые запросы `SEARCH_QUERIES` при необходимости меняются в `config.py`.
 
 ## 8. Подключить Ollama с Mac
 
-На Mac установлены Ollama и модель `qwen2.5:1.5b-instruct`. Соединение создаёт фоновая служба `com.romiv.hh-ollama-tunnel` с отдельным ключом `~/.ssh/hh_ollama_tunnel`.
+На Mac установлены Ollama и модель `qwen3:4b-instruct`. Соединение создаёт фоновая служба `com.romiv.hh-ollama-tunnel` с отдельным ключом `~/.ssh/hh_ollama_tunnel`.
 
 Схема соединения:
 
