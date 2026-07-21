@@ -1,0 +1,27 @@
+[Unit]
+Description=HH.ru AI Agent with Telegram approval
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=hh-agent
+Group=hh-agent
+WorkingDirectory=/opt/projects/hh-ai-agent
+EnvironmentFile=/opt/projects/hh-ai-agent/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/projects/hh-ai-agent/.playwright
+ExecStart=/opt/projects/hh-ai-agent/.venv/bin/python /opt/projects/hh-ai-agent/main.py
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+KillSignal=SIGINT
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/projects/hh-ai-agent
+
+[Install]
+WantedBy=multi-user.target
