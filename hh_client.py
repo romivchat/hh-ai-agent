@@ -4,7 +4,11 @@ import random
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 import database
-from ai_analyzer import is_vacancy_suitable, generate_cover_letter
+from ai_analyzer import (
+    OllamaUnavailableError,
+    generate_cover_letter,
+    is_vacancy_suitable,
+)
 from config import (
     HH_SUBMISSION_ENABLED,
     MAX_PENDING_JOBS,
@@ -241,6 +245,9 @@ class HHClient:
                                 print(f"❌ ИИ отклонил: {title}")
                                 database.add_filtered_job(job_id, title, href)
                             
+                        except OllamaUnavailableError as e:
+                            print(f"Анализ вакансий приостановлен: {e}")
+                            return
                         except Exception as e:
                             print(f"Ошибка при обработке вакансии {title}: {e}")
                         finally:

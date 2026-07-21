@@ -10,9 +10,10 @@
 - Папка проекта: `/opt/projects/hh-ai-agent`.
 - Сервис: `hh-ai-agent.service`.
 - Реальная отправка по умолчанию отключена: `HH_SUBMISSION_ENABLED=false`.
-- На 21 июля 2026 года сервер не принимает локальный ключ `~/.ssh/server_key`. До восстановления доступа установку не начинать.
+- Серверная часть установлена в `/opt/projects/hh-ai-agent`, зависимости и Chromium подготовлены.
+- Ollama работает на Mac владельца; сервер обращается к ней через закрытый SSH-туннель.
 
-## 1. Восстановить SSH-доступ
+## 1. SSH-доступ
 
 Обычная команда входа:
 
@@ -20,9 +21,7 @@
 ssh vzbot
 ```
 
-Если появляется `Permission denied (publickey,password)`, сервер не принимает локальный ключ. Не заменяйте ключи и не используйте ключ GitHub Actions без отдельного решения владельца сервера.
-
-После восстановления доступа следующая команда должна вывести имя сервера без ошибки:
+Следующая команда должна вывести имя сервера без ошибки:
 
 ```bash
 ssh vzbot hostname
@@ -39,10 +38,10 @@ free -h
 df -h / /opt
 nproc
 docker ps
-systemctl status ollama --no-pager
+ss -ltn | grep 11434
 ```
 
-Зачем: Playwright требует Python 3.10 или новее, а подходящую модель Ollama нужно выбирать по доступной оперативной памяти. Устанавливать `llama3` до этой проверки нельзя.
+Зачем: Playwright требует Python 3.10 или новее. Ollama на сервер не устанавливается, потому что модель запускается на Mac.
 
 ## 3. Скачать собственный репозиторий
 
@@ -122,31 +121,49 @@ TG_USER_ID="ВАШ_TELEGRAM_ID"
 MAX_PENDING_JOBS="10"
 HH_SUBMISSION_ENABLED="false"
 OLLAMA_URL="http://localhost:11434/api/generate"
-OLLAMA_MODEL="МОДЕЛЬ_ПОСЛЕ_ПРОВЕРКИ_РЕСУРСОВ"
+OLLAMA_MODEL="qwen2.5:1.5b-instruct"
+APPLICANT_NAME="ИМЯ_ДЛЯ_ПОДПИСИ"
+GITHUB_URL="https://github.com/romivchat"
+TARGET_RESUME_NAME="ТОЧНОЕ_НАЗВАНИЕ_РЕЗЮМЕ_НА_HH"
+MY_RESUME_SUMMARY="ОПЫТ_НАВЫКИ_ПРОЕКТЫ_И_ПОЖЕЛАНИЯ"
 ```
 
 На этапе настройки `HH_SUBMISSION_ENABLED` должен оставаться `false`.
 
-Также обязательно заменить в `config.py` данные автора исходного проекта:
+Данные автора исходного проекта удалены из шаблона. Перед запуском обязательно заполнить `APPLICANT_NAME`, `TARGET_RESUME_NAME` и `MY_RESUME_SUMMARY`. Поисковые запросы `SEARCH_QUERIES` при необходимости меняются в `config.py`.
 
-- `SEARCH_QUERIES`;
-- `TARGET_RESUME_NAME`;
-- `MY_RESUME_SUMMARY`;
-- имя, навыки и ссылки внутри шаблона письма в `ai_analyzer.py`.
+## 8. Подключить Ollama с Mac
 
-Без этого бот будет писать письма от имени автора исходного проекта.
+На Mac установлены Ollama и модель `qwen2.5:1.5b-instruct`. Соединение создаёт фоновая служба `com.romiv.hh-ollama-tunnel` с отдельным ключом `~/.ssh/hh_ollama_tunnel`.
 
-## 8. Подготовить Ollama
+Схема соединения:
 
-Конкретную модель выбрать только после проверки памяти сервера. Затем проверить:
-
-```bash
-ollama --version
-ollama list
-curl http://localhost:11434/api/tags
+```text
+бот на сервере -> 127.0.0.1:11434 на сервере
+              -> зашифрованный SSH-туннель
+              -> 127.0.0.1:11434 на Mac -> Ollama -> Qwen
 ```
 
-Название в `OLLAMA_MODEL` должно точно совпадать с названием из `ollama list`.
+На сервере проверить туннель и список моделей:
+
+```bash
+ss -ltn | grep 127.0.0.1:11434
+curl --max-time 10 http://127.0.0.1:11434/api/tags
+```
+
+Порт должен слушать только `127.0.0.1`, а не `0.0.0.0`. Для туннеля создан отдельный серверный пользователь `hh-ollama-tunnel`. Его ключ запрещает консольные команды и разрешает только обратное перенаправление порта `127.0.0.1:11434`.
+
+На Mac работают две фоновые службы. Проверить их можно командами:
+
+```bash
+launchctl print gui/$(id -u)/com.romiv.hh-ollama | grep "state ="
+launchctl print gui/$(id -u)/com.romiv.hh-ollama-tunnel | grep "state ="
+curl http://127.0.0.1:11434/api/tags
+```
+
+Обе команды `launchctl` должны показать `state = running`. Готовые файлы служб хранятся в `deploy/macos/`, а рабочие копии находятся в `~/Library/LaunchAgents/`. Логи записываются в `~/Library/Logs/hh-ollama.log` и `~/Library/Logs/hh-ollama-tunnel.log`.
+
+Mac должен быть включён и не спать. При выключенном Mac бот не помечает вакансию как неподходящую: анализ останавливается и повторяется в следующем 30-минутном цикле.
 
 ## 9. Получить сессию HH.ru
 

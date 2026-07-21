@@ -17,7 +17,11 @@ HH_SUBMISSION_ENABLED = os.getenv("HH_SUBMISSION_ENABLED", "false").strip().lowe
 
 # Ollama (локальная модель)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3") # Укажите используемую модель
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b-instruct")
+
+# Данные кандидата для сопроводительных писем
+APPLICANT_NAME = os.getenv("APPLICANT_NAME", "ИМЯ_НЕ_НАСТРОЕНО")
+GITHUB_URL = os.getenv("GITHUB_URL", "https://github.com/romivchat")
 
 # HH.ru настройки
 # Ключевые слова для поиска (backend, python, c, c++, cv)
@@ -33,20 +37,32 @@ SEARCH_QUERIES = [
     "Backend Python"
 ]
 # Название резюме, которое агент должен выбирать при отклике (должно в точности совпадать с тем, что написано на HH)
-TARGET_RESUME_NAME = "Backend-разработчик"
+TARGET_RESUME_NAME = os.getenv("TARGET_RESUME_NAME", "РЕЗЮМЕ_НЕ_НАСТРОЕНО")
 
 # Резюме (для генерации сопроводительного письма)
-MY_RESUME_SUMMARY = """
-Я программист с опытом разработки на Python, C, C++. 
-Интересуюсь backend-разработкой, фулстек-задачами и Computer Vision.
-Готов решать сложные задачи и быстро обучаюсь.
-Имею очень крутые и сильные проекты на гитхаб https://github.com/fikstt2, самый крутой из них - VisionForge.
-Не боюсь рутины, готов учить все что нужно для работы. 
-Владею инструментами ИИ и могу сам быстро обучить себя чему угодно.
-Ищу удаленную работу, либо работу в офисе в Санкт-Петербурге.
-Зарплата от 120 000 руб.
-Готов проходить тестовые задания и собеседования. Если в вакансии указано автоматизация и агенты - привожу пример, что откликаюсь через своего бота.
-Имею опыт обучения моделей компьютерного зрения для задач детекции и классификации.
-Имею высшее образование по направлению "Информатика и вычислительная техника".
-Мой стек: Python, C++, C, Docker, SQL, FastAPI, PyQt, HTML, JS, TensorFlow, PyTorch, PostgreSQL, Linux.
-"""
+MY_RESUME_SUMMARY = os.getenv("MY_RESUME_SUMMARY", "ПРОФИЛЬ_НЕ_НАСТРОЕН")
+
+
+def validate_configuration() -> None:
+    missing = []
+    if TG_BOT_TOKEN in {"YOUR_BOT_TOKEN_HERE", "ВАШ_ТОКЕН_ОТ_BOTFATHER"}:
+        missing.append("TG_BOT_TOKEN")
+    if not TG_USER_ID.isdigit():
+        missing.append("TG_USER_ID")
+    if APPLICANT_NAME in {"ИМЯ_НЕ_НАСТРОЕНО", "ВАШЕ_ИМЯ"}:
+        missing.append("APPLICANT_NAME")
+    if TARGET_RESUME_NAME in {
+        "РЕЗЮМЕ_НЕ_НАСТРОЕНО",
+        "ТОЧНОЕ_НАЗВАНИЕ_РЕЗЮМЕ_НА_HH",
+    }:
+        missing.append("TARGET_RESUME_NAME")
+    if MY_RESUME_SUMMARY in {
+        "ПРОФИЛЬ_НЕ_НАСТРОЕН",
+        "ПОДРОБНОЕ_ОПИСАНИЕ_ОПЫТА_НАВЫКОВ_И_ПОЖЕЛАНИЙ",
+    }:
+        missing.append("MY_RESUME_SUMMARY")
+
+    if missing:
+        raise RuntimeError(
+            "Заполните обязательные настройки в .env: " + ", ".join(missing)
+        )
