@@ -4,6 +4,7 @@ agent.db
 agent.db-shm
 agent.db-wal
 captcha.png
+.playwright/
 __pycache__/
 *.pyc
 .venv/

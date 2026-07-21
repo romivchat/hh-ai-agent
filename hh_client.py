@@ -5,7 +5,12 @@ from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 import database
 from ai_analyzer import is_vacancy_suitable, generate_cover_letter
-from config import MAX_PENDING_JOBS, SEARCH_QUERIES, TARGET_RESUME_NAME
+from config import (
+    HH_SUBMISSION_ENABLED,
+    MAX_PENDING_JOBS,
+    SEARCH_QUERIES,
+    TARGET_RESUME_NAME,
+)
 
 STATE_FILE = os.path.join(os.path.dirname(__file__), "state.json")
 
@@ -254,6 +259,13 @@ class HHClient:
 
     async def apply_pending_job(self, job_id: str) -> tuple[bool, str]:
         """Отправляет отклик только после явного нажатия кнопки в Telegram."""
+        if not HH_SUBMISSION_ENABLED:
+            return (
+                False,
+                "Отправка откликов временно отключена настройкой "
+                "HH_SUBMISSION_ENABLED. Вакансия осталась в ожидании.",
+            )
+
         async with self.application_lock:
             if self.context is None:
                 return False, "Браузер HH ещё не готов. Попробуйте немного позже."

@@ -1,6 +1,10 @@
 import ast
+import asyncio
 import unittest
 from pathlib import Path
+from unittest import mock
+
+from hh_client import HHClient
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +20,16 @@ def async_function_source(path: Path, function_name: str) -> str:
 
 
 class ApprovalBoundaryTest(unittest.TestCase):
+    def test_submission_kill_switch_stops_before_browser_access(self) -> None:
+        client = HHClient()
+        client.context = object()
+
+        with mock.patch("hh_client.HH_SUBMISSION_ENABLED", False):
+            success, message = asyncio.run(client.apply_pending_job("123"))
+
+        self.assertFalse(success)
+        self.assertIn("HH_SUBMISSION_ENABLED", message)
+
     def test_search_never_clicks_application_buttons(self) -> None:
         source = async_function_source(ROOT / "hh_client.py", "search_and_queue")
 
@@ -26,6 +40,7 @@ class ApprovalBoundaryTest(unittest.TestCase):
     def test_real_submission_is_isolated_behind_database_claim(self) -> None:
         source = async_function_source(ROOT / "hh_client.py", "apply_pending_job")
 
+        self.assertIn("HH_SUBMISSION_ENABLED", source)
         self.assertIn("claim_pending_job", source)
         self.assertIn("apply_btn.click", source)
         self.assertIn("submit_btn.click", source)

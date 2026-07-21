@@ -8,6 +8,12 @@ load_dotenv()
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 TG_USER_ID = os.getenv("TG_USER_ID", "YOUR_USER_ID_HERE")
 MAX_PENDING_JOBS = int(os.getenv("MAX_PENDING_JOBS", "10"))
+HH_SUBMISSION_ENABLED = os.getenv("HH_SUBMISSION_ENABLED", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 # Ollama (локальная модель)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
