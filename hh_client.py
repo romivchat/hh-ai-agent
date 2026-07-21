@@ -13,7 +13,7 @@ from config import (
     HH_SUBMISSION_ENABLED,
     MAX_PENDING_JOBS,
     SEARCH_QUERIES,
-    TARGET_RESUME_NAME,
+    TARGET_RESUME_NAMES,
 )
 
 STATE_FILE = os.path.join(os.path.dirname(__file__), "state.json")
@@ -96,15 +96,20 @@ class HHClient:
             print(f"🔍 Поиск по запросу: {query}")
             print(f"======================================")
             
-            # Два режима поиска: сначала Питер (все графики), потом РФ (только удаленка)
+            # Два режима поиска: сначала Москва, потом удалённые вакансии по РФ.
             search_configs = [
-                {"name": "Санкт-Петербург (любой график)", "params": "&area=2"},
+                {"name": "Москва (любой график)", "params": "&area=1"},
                 {"name": "Вся Россия (только удаленка)", "params": "&area=113&schedule=remote"}
             ]
             
             for config in search_configs:
                 print(f"📍 Режим: {config['name']}")
-                url = f"https://hh.ru/search/vacancy?text={query}&order_by=publication_time&experience=noExperience&experience=between1And3{config['params']}"
+                url = (
+                    f"https://hh.ru/search/vacancy?text={query}"
+                    "&order_by=publication_time"
+                    "&experience=between3And6&experience=moreThan6"
+                    f"{config['params']}"
+                )
                 await self.page.goto(url)
                 await asyncio.sleep(3)
                 page_num = 1
@@ -202,16 +207,19 @@ class HHClient:
                                     break # В случае системной ошибки выходим, чтобы не зациклиться
                             description = await desc_loc.inner_text()
 
-                            # Базовый жесткий фильтр по названию, чтобы не пускать ИИ на очевидные сеньорские позиции, стажировки или неайтишные профессии
+                            # Базовый фильтр только для явно непродуктовых ролей.
                             title_lower = title.lower()
-                            stop_words = [
-                                "senior", "сеньор", "lead", "лид", "architect", "архитектор", "руководитель", "главный", 
-                                "стажер", "intern", "trainee", "стажировка", "менеджер", "manager", "дизайнер", "designer", 
-                                "hr", "аналитик", "analyst", "преподаватель", "педагог", "маркетолог", "продаж", "1с", "1c",
-                                "слесарь", "диспетчер", "ассистент", "риелтор", "учитель"
+                            stop_phrases = [
+                                "junior", "стажер", "стажёр", "intern", "trainee",
+                                "project manager", "менеджер проектов", "scrum master",
+                                "product marketing", "маркетолог", "marketing manager",
+                                "sales manager", "менеджер по продажам", "аккаунт-менеджер",
+                                "бизнес-аналитик", "data analyst", "product analyst",
+                                "продуктовый аналитик", "разработчик", "developer",
+                                "дизайнер", "designer", "рекрутер", "риелтор",
                             ]
-                            if any(word in title_lower for word in stop_words):
-                                print(f"⏩ Пропускаем (Неподходящий грейд/профессия): {title}")
+                            if any(phrase in title_lower for phrase in stop_phrases):
+                                print(f"⏩ Пропускаем (непродуктовая роль): {title}")
                                 database.add_filtered_job(job_id, title, href)
                                 continue
                             
@@ -298,7 +306,7 @@ class HHClient:
                 await apply_btn.click()
                 await asyncio.sleep(3)
 
-                if TARGET_RESUME_NAME:
+                if TARGET_RESUME_NAMES:
                     resume_dropdown = page.locator(
                         '[data-qa*="resume-select"], '
                         '[data-qa*="resume-selector"], '
@@ -307,14 +315,20 @@ class HHClient:
                     if await resume_dropdown.is_visible():
                         await resume_dropdown.click()
                         await asyncio.sleep(1)
-                        target_resume_btn = page.locator(
-                            f'text="{TARGET_RESUME_NAME}"'
-                        ).first
-                        if not await target_resume_btn.is_visible():
+                        selected_resume = None
+                        for target_resume_name in TARGET_RESUME_NAMES:
+                            target_resume_btn = page.get_by_text(
+                                target_resume_name,
+                                exact=True,
+                            ).first
+                            if await target_resume_btn.is_visible():
+                                selected_resume = target_resume_btn
+                                break
+                        if selected_resume is None:
                             raise RuntimeError(
-                                f"резюме «{TARGET_RESUME_NAME}» не найдено"
+                                "не найдено резюме: " + ", ".join(TARGET_RESUME_NAMES)
                             )
-                        await target_resume_btn.click()
+                        await selected_resume.click()
                         await asyncio.sleep(1)
 
                 toggle_btn = page.locator('[data-qa*="letter-toggle"]').or_(
