@@ -31,6 +31,14 @@ upstream  -> https://github.com/fikstt2/hh-ai-agent.git
 - Существующий бот взаимных подписок: `/opt/projects/vz-podpiski`.
 - Новый HH-бот должен находиться отдельно: `/opt/projects/hh-ai-agent`.
 
+### Проверка доступа 21 июля 2026 года
+
+- Алиас `vzbot` правильно указывает на `root@213.176.115.241` и файл `~/.ssh/server_key`.
+- Сервер отклонил `~/.ssh/server_key` с ошибкой `Permission denied (publickey,password)`.
+- Последние два запуска GitHub Actions для `romivchat/vz_podpiski` от 3 июля 2026 года завершились успешно, включая серверный деплой.
+- На компьютере есть отдельный ключ `~/.ssh/vz_podpiski_github_actions`, но он предназначен для GitHub Actions и не используется для ручного входа без отдельного решения владельца.
+- До восстановления ручного SSH-доступа нельзя выполнять установку HH-бота на production-сервер.
+
 ## Правила совместного размещения
 
 - Не изменять и не останавливать `/opt/projects/vz-podpiski` при установке HH-бота.
