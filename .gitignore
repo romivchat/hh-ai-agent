@@ -1,6 +1,9 @@
 .env
 state.json
 agent.db
+agent.db-shm
+agent.db-wal
+captcha.png
 __pycache__/
 *.pyc
 .venv/
@@ -8,3 +11,4 @@ venv/
 env/
 .vscode/
 .idea/
+.DS_Store
