@@ -5,7 +5,7 @@ from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 import database
 from ai_analyzer import is_vacancy_suitable, generate_cover_letter
-from config import SEARCH_QUERIES
+from config import MAX_PENDING_JOBS, SEARCH_QUERIES, TARGET_RESUME_NAME
 
 STATE_FILE = os.path.join(os.path.dirname(__file__), "state.json")
 
@@ -15,6 +15,7 @@ class HHClient:
         self.browser = None
         self.context = None
         self.page = None
+        self.application_lock = asyncio.Lock()
 
     async def start(self):
         self.playwright = await async_playwright().start()
@@ -75,8 +76,12 @@ class HHClient:
             print(f"❌ Произошла ошибка при сохранении авторизации: {e}")
             return False
 
-    async def search_and_apply(self, send_notification_func):
+    async def search_and_queue(self, send_notification_func, send_pending_vacancy_func):
         print("Начинаем поиск вакансий...")
+        if database.count_pending_jobs() >= MAX_PENDING_JOBS:
+            print(f"Очередь заполнена: ожидают решения {MAX_PENDING_JOBS} вакансий.")
+            return
+
         for query in SEARCH_QUERIES:
             print(f"\n======================================")
             print(f"🔍 Поиск по запросу: {query}")
@@ -107,12 +112,16 @@ class HHClient:
                             links_to_process.append((title, href))
                         
                     for title, href in links_to_process:
+                        if database.count_pending_jobs() >= MAX_PENDING_JOBS:
+                            print(f"Очередь заполнена: ожидают решения {MAX_PENDING_JOBS} вакансий.")
+                            return
+
                         # Парсим ID вакансии из URL (https://hh.ru/vacancy/123456?...)
                         job_id = None
                         if "vacancy/" in href:
                             job_id = href.split("vacancy/")[1].split("?")[0]
                     
-                        if not job_id or database.is_job_applied(job_id):
+                        if not job_id or database.is_job_processed(job_id):
                             # print(f"Пропускаем (уже обработано): {title}") # Раскомментировать, если нужно видеть все пропуски
                             continue
                     
@@ -194,89 +203,38 @@ class HHClient:
                             ]
                             if any(word in title_lower for word in stop_words):
                                 print(f"⏩ Пропускаем (Неподходящий грейд/профессия): {title}")
+                                database.add_filtered_job(job_id, title, href)
                                 continue
                             
                             # Анализ ИИ
                             if await is_vacancy_suitable(title, description):
                                 print(f"✨ Вакансия подходит: {title}")
-                            
                                 cover_letter = await generate_cover_letter(title, description)
-                            
-                                # Пробуем откликнуться
+
+                                # На этапе поиска ничего не нажимаем: только проверяем,
+                                # что для вакансии доступен отклик, и ставим её в очередь.
                                 apply_btn = page.locator('a[data-qa="vacancy-response-link-top"]').first
                                 if await apply_btn.is_visible():
-                                    # Имитируем поведение человека перед откликом
-                                    await page.mouse.move(random.randint(100, 700), random.randint(100, 500))
-                                    await page.mouse.wheel(0, random.randint(200, 600))
-                                    await asyncio.sleep(random.uniform(0.8, 1.5))
-                                    await page.mouse.wheel(0, random.randint(-200, 100))
-                                    await asyncio.sleep(random.uniform(0.5, 1.0))
-                                    
-                                    await apply_btn.click()
-                                    # Даем время на открытие попапа ИЛИ загрузку новой страницы отклика
-                                    await asyncio.sleep(3)
-                                
-                                    # Шаг 0: Выбор нужного резюме (если их несколько)
-                                    try:
-                                        from config import TARGET_RESUME_NAME
-                                        if TARGET_RESUME_NAME:
-                                            resume_dropdown = page.locator('[data-qa*="resume-select"], [data-qa*="resume-selector"], [data-qa="vacancy-response-resume-selector"]').first
-                                            if await resume_dropdown.is_visible():
-                                                await resume_dropdown.click()
-                                                await asyncio.sleep(1)
-                                                # Кликаем по нужному резюме из выпадающего списка
-                                                target_resume_btn = page.locator(f'text="{TARGET_RESUME_NAME}"').first
-                                                if await target_resume_btn.is_visible():
-                                                    await target_resume_btn.click()
-                                                    await asyncio.sleep(1)
-                                    except Exception as e:
-                                        print(f"⚠️ Ошибка при выборе резюме: {e}")
-                                
-                                    # Шаг 1: Ищем кнопку "Написать/Добавить сопроводительное" (если поле изначально скрыто)
-                                    toggle_btn = page.locator('[data-qa*="letter-toggle"]').or_(
-                                        page.locator('text="Написать сопроводительное"')
-                                    ).or_(
-                                        page.locator('text="Добавить сопроводительное"')
-                                    ).first
-                                    if await toggle_btn.is_visible():
-                                        try:
-                                            await toggle_btn.click()
-                                            await asyncio.sleep(1)
-                                        except:
-                                            pass
-                                
-                                    # Шаг 2: Ищем ЛЮБОЕ многострочное поле (textarea) и ждем его появления (до 3 сек)
-                                    letter_sent = False
-                                    try:
-                                        letter_textarea = page.locator('textarea').first
-                                        await letter_textarea.wait_for(state="visible", timeout=3000)
-                                        await letter_textarea.fill(cover_letter)
-                                        letter_sent = True
-                                    except:
-                                        print(f"⚠️ Не удалось найти видимое поле (textarea) для письма: {title}")
-                                    
-                                    # Шаг 3: Отправка отклика (ищем любую видимую кнопку отправки)
-                                    submit_btn = page.locator('button[data-qa*="vacancy-response-submit"]:visible').first
-                                    if await submit_btn.is_visible():
-                                        await submit_btn.click() # РЕАЛЬНЫЙ ОТКЛИК
-                                        await asyncio.sleep(2)
-                                    
-                                        database.add_applied_job(job_id, title, href)
-                                    
-                                        import html
-                                        safe_cover_letter = html.escape(cover_letter)
-                                    
-                                        if letter_sent:
-                                            await send_notification_func(f"✅ Успешный отклик: <a href='{href}'>{title}</a>\n\n<b>Письмо:</b>\n<i>{safe_cover_letter}</i>")
-                                        else:
-                                            await send_notification_func(f"✅ Отклик без письма: <a href='{href}'>{title}</a>\n\n<i>(Работодатель отключил возможность отправки писем для этой вакансии)</i>")
-                                        print(f"✅ Отклик отправлен: {title}")
+                                    queued = database.add_pending_job(
+                                        job_id,
+                                        title,
+                                        href,
+                                        cover_letter,
+                                        MAX_PENDING_JOBS,
+                                    )
+                                    if queued:
+                                        job = database.get_job(job_id)
+                                        await send_pending_vacancy_func(job)
+                                        print(f"Вакансия ожидает решения в Telegram: {title}")
+                                    elif database.count_pending_jobs() >= MAX_PENDING_JOBS:
+                                        print("Очередь решений заполнена.")
+                                        return
                                 else:
-                                    print(f"Кнопка отклика не найдена (возможно, уже откликались): {title}")
-                                    database.add_applied_job(job_id, title, href)
+                                    print(f"Кнопка отклика не найдена: {title}")
+                                    database.add_filtered_job(job_id, title, href)
                             else:
                                 print(f"❌ ИИ отклонил: {title}")
-                                database.add_applied_job(job_id, title, href) # Добавляем, чтобы больше не анализировать
+                                database.add_filtered_job(job_id, title, href)
                             
                         except Exception as e:
                             print(f"Ошибка при обработке вакансии {title}: {e}")
@@ -293,6 +251,95 @@ class HHClient:
                     else:
                         print("🛑 Больше страниц нет, переходим к следующему запросу.")
                         break
+
+    async def apply_pending_job(self, job_id: str) -> tuple[bool, str]:
+        """Отправляет отклик только после явного нажатия кнопки в Telegram."""
+        async with self.application_lock:
+            if self.context is None:
+                return False, "Браузер HH ещё не готов. Попробуйте немного позже."
+
+            job = database.claim_pending_job(job_id)
+            if job is None:
+                return False, "Вакансия уже обработана или отправляется."
+
+            page = None
+            try:
+                page = await self.context.new_page()
+                await Stealth().apply_stealth_async(page)
+                await page.goto(job["url"])
+                await asyncio.sleep(2)
+
+                apply_btn = page.locator('a[data-qa="vacancy-response-link-top"]').first
+                if not await apply_btn.is_visible():
+                    raise RuntimeError("кнопка отклика недоступна или вакансия закрыта")
+
+                await page.mouse.move(random.randint(100, 700), random.randint(100, 500))
+                await page.mouse.wheel(0, random.randint(200, 600))
+                await asyncio.sleep(random.uniform(0.8, 1.5))
+                await apply_btn.click()
+                await asyncio.sleep(3)
+
+                if TARGET_RESUME_NAME:
+                    resume_dropdown = page.locator(
+                        '[data-qa*="resume-select"], '
+                        '[data-qa*="resume-selector"], '
+                        '[data-qa="vacancy-response-resume-selector"]'
+                    ).first
+                    if await resume_dropdown.is_visible():
+                        await resume_dropdown.click()
+                        await asyncio.sleep(1)
+                        target_resume_btn = page.locator(
+                            f'text="{TARGET_RESUME_NAME}"'
+                        ).first
+                        if not await target_resume_btn.is_visible():
+                            raise RuntimeError(
+                                f"резюме «{TARGET_RESUME_NAME}» не найдено"
+                            )
+                        await target_resume_btn.click()
+                        await asyncio.sleep(1)
+
+                toggle_btn = page.locator('[data-qa*="letter-toggle"]').or_(
+                    page.locator('text="Написать сопроводительное"')
+                ).or_(
+                    page.locator('text="Добавить сопроводительное"')
+                ).first
+                if await toggle_btn.is_visible():
+                    await toggle_btn.click()
+                    await asyncio.sleep(1)
+
+                letter_textarea = page.locator("textarea").first
+                try:
+                    await letter_textarea.wait_for(state="visible", timeout=3000)
+                except Exception as exc:
+                    raise RuntimeError(
+                        "работодатель не разрешает добавить сопроводительное письмо"
+                    ) from exc
+                await letter_textarea.fill(job["cover_letter"])
+
+                submit_btn = page.locator(
+                    'button[data-qa*="vacancy-response-submit"]:visible'
+                ).first
+                if not await submit_btn.is_visible():
+                    raise RuntimeError("кнопка отправки отклика не найдена")
+
+                await submit_btn.click()
+                await asyncio.sleep(2)
+                if not database.mark_job_applied(job_id):
+                    raise RuntimeError("не удалось сохранить результат в базе")
+
+                print(f"Отклик отправлен после подтверждения: {job['title']}")
+                return True, f"Отклик отправлен: {job['title']}"
+            except Exception as exc:
+                database.restore_pending_job(job_id)
+                print(f"Ошибка подтверждённого отклика {job['title']}: {exc}")
+                return (
+                    False,
+                    f"Отклик не отправлен: {job['title']}\n"
+                    f"Причина: {exc}\n{job['url']}",
+                )
+            finally:
+                if page is not None:
+                    await page.close()
 
     async def check_chats(self, send_notification_func):
         print("Проверка новых сообщений в чатах HH...")

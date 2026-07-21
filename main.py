@@ -1,6 +1,11 @@
 import asyncio
 from database import init_db
-from tg_bot import start_bot, send_notification
+from tg_bot import (
+    send_notification,
+    send_pending_vacancy,
+    set_application_handler,
+    start_bot,
+)
 from hh_client import HHClient
 
 async def agent_loop():
@@ -14,13 +19,15 @@ async def agent_loop():
         await client.stop()
         return
 
+    set_application_handler(client.apply_pending_job)
+
     await send_notification("🤖 ИИ-агент успешно запущен и начал работу!")
 
     try:
         while True:
             try:
-                # Ищем вакансии и откликаемся
-                await client.search_and_apply(send_notification)
+                # Ищем вакансии и отправляем их в Telegram на согласование.
+                await client.search_and_queue(send_notification, send_pending_vacancy)
                 
                 # Проверяем чаты
                 await client.check_chats(send_notification)
@@ -31,6 +38,7 @@ async def agent_loop():
             print("Ожидание 30 минут...")
             await asyncio.sleep(1800)
     finally:
+        set_application_handler(None)
         await client.stop()
 
 async def main():
