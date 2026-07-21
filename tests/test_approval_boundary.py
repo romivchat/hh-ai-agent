@@ -37,6 +37,16 @@ class ApprovalBoundaryTest(unittest.TestCase):
         self.assertNotIn("submit_btn.click", source)
         self.assertIn("add_pending_job", source)
 
+    def test_ollama_outage_stops_search_without_filtering_current_job(self) -> None:
+        source = async_function_source(ROOT / "hh_client.py", "search_and_queue")
+
+        self.assertIn("except OllamaUnavailableError", source)
+        outage_handler = source.split("except OllamaUnavailableError", 1)[1].split(
+            "except Exception", 1
+        )[0]
+        self.assertIn("return", outage_handler)
+        self.assertNotIn("add_filtered_job", outage_handler)
+
     def test_real_submission_is_isolated_behind_database_claim(self) -> None:
         source = async_function_source(ROOT / "hh_client.py", "apply_pending_job")
 

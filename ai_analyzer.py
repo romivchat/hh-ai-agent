@@ -1,5 +1,40 @@
 import aiohttp
-from config import OLLAMA_URL, OLLAMA_MODEL, MY_RESUME_SUMMARY
+from config import (
+    APPLICANT_NAME,
+    GITHUB_URL,
+    MY_RESUME_SUMMARY,
+    OLLAMA_MODEL,
+    OLLAMA_URL,
+)
+
+
+class OllamaUnavailableError(RuntimeError):
+    """Ollama недоступна или вернула ответ, который нельзя использовать."""
+
+
+async def _ask_ollama(prompt: str, timeout_seconds: int = 60) -> str:
+    payload = {
+        "model": OLLAMA_MODEL,
+        "prompt": prompt,
+        "stream": False,
+    }
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(OLLAMA_URL, json=payload) as response:
+                response.raise_for_status()
+                data = await response.json()
+    except (aiohttp.ClientError, TimeoutError, ValueError) as error:
+        raise OllamaUnavailableError(
+            f"Ollama недоступна по адресу {OLLAMA_URL}: {error}"
+        ) from error
+
+    answer = data.get("response", "").strip()
+    if not answer:
+        raise OllamaUnavailableError("Ollama вернула пустой ответ.")
+    return answer
+
 
 async def generate_cover_letter(vacancy_title: str, vacancy_description: str) -> str:
     prompt = f"""
@@ -14,50 +49,23 @@ async def generate_cover_letter(vacancy_title: str, vacancy_description: str) ->
 1. ПИСАТЬ СТРОГО ТОЛЬКО НА РУССКОМ ЯЗЫКЕ! Никакого английского текста.
 2. Пиши развернуто, структурировано (3-4 абзаца).
 3. Стиль: живой, профессиональный, уверенный.
-4. Включай в письмо перечисление моего стека технологий, упоминание высшего образования и опыта работы с ИИ из моего профиля.
-5. Обязательно упомяни мой пет-проект VisionForge и ВСЕГДА вставляй ссылку на мой GitHub: https://github.com/fikstt2
+4. Используй только факты из моего профиля. Не придумывай опыт, образование, проекты или навыки.
+5. Если в профиле есть подходящие проекты, упомяни наиболее релевантный. Вставь ссылку на мой GitHub: {GITHUB_URL}
 6. Никаких подписей в начале письма! Только в самом конце.
-7. Подпись строго: "Евгений". Никаких "С уважением".
+7. Подпись строго: "{APPLICANT_NAME}". Никаких "С уважением".
 8. ВЫВОДИ ТОЛЬКО ТЕКСТ ПИСЬМА БЕЗ КАВЫЧЕК. Твой ответ копируется автоматически! Строго запрещены любые вводные фразы (например, "Here is a sample...", "Вот письмо:"). Ни слова, кроме самого письма.
-
-Пример хорошего письма:
-Привет!
-
-Заинтересовала вакансия {vacancy_title}. Я программист с опытом разработки на Python, C, C++. Интересуюсь backend-разработкой, фулстек-задачами и Computer Vision. Готов решать сложные задачи и быстро обучаюсь.
-
-Я владею инструментами ИИ и могу сам быстро обучить себя чему угодно. Имею опыт обучения моделей компьютерного зрения для задач детекции и классификации. Высшее образование по направлению "Информатика и вычислительная техника".
-
-Мой стек: Python, C++, C, Docker, SQL, FastAPI, PyQt, HTML, JS, TensorFlow, PyTorch, PostgreSQL, Linux.
-
-Отдельно хочу упомянуть свой пет-проект VisionForge — это фулстек-решение для компьютерного зрения, которое я реализовал на Python и PyQt5 (код тут: https://github.com/fikstt2). Я готов проходить тестовые задания и собеседования.
-
-Буду рад пообщаться подробнее!
-
-Евгений
 """
     
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "stream": False
-    }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(OLLAMA_URL, json=payload) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    text = data.get("response", "").strip()
-                    # Жесткая очистка от частых галлюцинаций LLM
-                    text = text.replace('"', '').replace("'", "")
-                    if "Here is" in text or "Here's" in text:
-                        text = text.split("\n\n", 1)[-1]
-                    if "Note:" in text:
-                        text = text.split("Note:")[0].strip()
-                    return text.strip()
-    except Exception as e:
-        print(f"Ошибка при обращении к Ollama (письмо): {e}")
-        return "Здравствуйте! Прошу рассмотреть мое резюме на эту вакансию. Буду рад обсудить детали на собеседовании."
+    text = await _ask_ollama(prompt)
+    # Жесткая очистка от частых вводных фраз модели.
+    text = text.replace('"', '').replace("'", "")
+    if "Here is" in text or "Here's" in text:
+        text = text.split("\n\n", 1)[-1]
+    if "Note:" in text:
+        text = text.split("Note:")[0].strip()
+    if not text.strip():
+        raise OllamaUnavailableError("После очистки письмо оказалось пустым.")
+    return text.strip()
 
 async def is_vacancy_suitable(vacancy_title: str, vacancy_description: str) -> bool:
     prompt = f"""
@@ -79,19 +87,11 @@ async def is_vacancy_suitable(vacancy_title: str, vacancy_description: str) -> b
 Если не подходит, ответь ТОЛЬКО одним словом: NO.
 """
     
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "stream": False
-    }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(OLLAMA_URL, json=payload, timeout=30) as response:
-                response.raise_for_status()
-                data = await response.json()
-                answer = data.get("response", "").strip().upper()
-                return "YES" in answer
-    except Exception as e:
-        print(f"Ошибка при обращении к Ollama (анализ): {e}")
+    answer = (await _ask_ollama(prompt, timeout_seconds=30)).strip().upper()
+    if answer == "YES":
+        return True
+    if answer == "NO":
         return False
+    raise OllamaUnavailableError(
+        f"Ollama вернула неожиданный ответ на анализ вакансии: {answer[:100]}"
+    )

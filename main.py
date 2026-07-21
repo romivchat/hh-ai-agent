@@ -1,4 +1,5 @@
 import asyncio
+from config import validate_configuration
 from database import init_db
 from tg_bot import (
     send_notification,
@@ -42,6 +43,8 @@ async def agent_loop():
         await client.stop()
 
 async def main():
+    validate_configuration()
+
     # Инициализация БД
     init_db()
     print("Инициализация завершена.")
