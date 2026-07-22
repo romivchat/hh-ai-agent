@@ -315,6 +315,30 @@ class AiAnalyzerTest(unittest.TestCase):
             ["credit_growth", "monetization"],
         )
 
+    def test_partial_strict_match_is_transferable_not_direct(self) -> None:
+        profile = candidate_profile()
+        profile["facts"][2]["capabilities"].append("retention")
+        analysis = portfolio_analysis()
+        lifecycle = next(
+            match
+            for match in analysis["matches"]
+            if match["requirement_id"] == "lifecycle"
+        )
+        lifecycle["status"] = "direct"
+        lifecycle["fact_ids"] = ["credit_growth"]
+
+        validated = ai_analyzer._validate_analysis(
+            copy.deepcopy(analysis),
+            PORTFOLIO_DESCRIPTION,
+            profile,
+        )
+        lifecycle = next(
+            match
+            for match in validated["matches"]
+            if match["requirement_id"] == "lifecycle"
+        )
+        self.assertEqual(lifecycle["status"], "transferable")
+
     def test_missing_salary_and_english_become_warnings(self) -> None:
         profile = candidate_profile()
         pbf_warnings = ai_analyzer.build_warnings(pbf_analysis(), profile)

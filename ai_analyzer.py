@@ -452,9 +452,13 @@ def _validate_analysis(result: dict, vacancy_description: str, profile: dict) ->
             for fact_id in match["fact_ids"]
             for capability in facts[fact_id]["capabilities"]
         }
-        if strict_required and not strict_required & supported_capabilities:
-            match["status"] = "gap"
-            match["fact_ids"] = []
+        missing_strict = strict_required - supported_capabilities
+        if missing_strict:
+            if strict_required & supported_capabilities and match["status"] == "direct":
+                match["status"] = "transferable"
+            else:
+                match["status"] = "gap"
+                match["fact_ids"] = []
         elif (
             "portfolio" in item["capabilities"]
             and match["status"] == "direct"
