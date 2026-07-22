@@ -997,13 +997,40 @@ def _compose_cover_letter(analysis: dict, profile: dict) -> str:
     if compensation_required and isinstance(compensation, str) and compensation.strip():
         compensation_text = f" Мои зарплатные ожидания — {compensation.strip().rstrip('.')} .".replace(" .", ".")
 
-    paragraphs = (
+    long_closing = (
+        "Мне интересна возможность отвечать за этот результат и связывать "
+        "продуктовые решения с измеримым эффектом для бизнеса и пользователей. "
+        "Особенно привлекает ответственность за полный цикл решений и возможность "
+        "оценивать их влияние по продуктовым и бизнес-показателям."
+        f"{compensation_text} Буду рад подробно обсудить задачи роли, приоритеты "
+        "и ожидаемые результаты."
+    )
+    short_closing = (
+        "Мне интересна возможность отвечать за этот результат."
+        f"{compensation_text} Буду рад подробно обсудить задачи роли, приоритеты "
+        "и ожидаемые результаты."
+    )
+    paragraphs = [
         positioning,
         f"Ключевая задача этой роли — {goal}. {selected[0]['public_text']}",
         f"{selected[1]['public_text']}{english_text}",
-        f"Мне интересна возможность отвечать за этот результат и связывать продуктовые решения с измеримым эффектом для бизнеса и пользователей. Особенно привлекает ответственность за полный цикл решений и возможность оценивать их влияние по продуктовым и бизнес-показателям.{compensation_text} Буду рад подробно обсудить задачи роли, приоритеты и ожидаемые результаты.",
-    )
-    return "Здравствуйте!\n\n" + "\n\n".join(paragraphs) + f"\n\n{APPLICANT_NAME}"
+        long_closing,
+    ]
+
+    def render() -> str:
+        return "Здравствуйте!\n\n" + "\n\n".join(paragraphs) + f"\n\n{APPLICANT_NAME}"
+
+    text = render()
+    if len(re.findall(r"\b[\w-]+\b", text, flags=re.UNICODE)) > MAX_LETTER_WORDS:
+        paragraphs[-1] = short_closing
+        text = render()
+    if len(re.findall(r"\b[\w-]+\b", text, flags=re.UNICODE)) < MIN_LETTER_WORDS:
+        paragraphs[-1] += (
+            " Готов предметно обсудить ограничения продукта и критерии успеха "
+            "на ближайшем этапе."
+        )
+        text = render()
+    return text
 
 
 def _number_tokens(text: str) -> set[str]:
