@@ -9,6 +9,7 @@ import aiohttp
 from config import (
     APPLICANT_NAME,
     CANDIDATE_PROFILE_PATH,
+    OLLAMA_CONTEXT_LENGTH,
     OLLAMA_MODEL,
     OLLAMA_URL,
 )
@@ -126,6 +127,7 @@ async def _ask_ollama(
         "options": {
             "temperature": temperature,
             "num_predict": max_output_tokens,
+            "num_ctx": OLLAMA_CONTEXT_LENGTH,
         },
     }
     if response_format is not None:
