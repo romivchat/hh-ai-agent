@@ -124,13 +124,23 @@ OLLAMA_URL="http://localhost:11434/api/generate"
 OLLAMA_MODEL="qwen3:4b-instruct"
 APPLICANT_NAME="ИМЯ_ДЛЯ_ПОДПИСИ"
 GITHUB_URL="https://github.com/romivchat"
+CANDIDATE_PROFILE_PATH="/opt/projects/hh-ai-agent/candidate_profile.json"
 TARGET_RESUME_NAMES="PRODUCT_MANAGER|PRODUCT_OWNER|CPO"
 MY_RESUME_SUMMARY="ОПЫТ_НАВЫКИ_ПРОЕКТЫ_И_ПОЖЕЛАНИЯ"
 ```
 
 На этапе настройки `HH_SUBMISSION_ENABLED` должен оставаться `false`.
 
-Данные автора исходного проекта удалены из шаблона. Перед запуском обязательно заполнить `APPLICANT_NAME`, `TARGET_RESUME_NAMES` и `MY_RESUME_SUMMARY`. Названия резюме разделяются символом `|`; бот выбирает первое найденное. Поисковые запросы `SEARCH_QUERIES` при необходимости меняются в `config.py`.
+Данные автора исходного проекта удалены из шаблона. Перед запуском обязательно заполнить `APPLICANT_NAME`, `TARGET_RESUME_NAMES`, `MY_RESUME_SUMMARY` и закрытый `candidate_profile.json`. Названия резюме разделяются символом `|`; бот выбирает первое найденное. Поисковые запросы `SEARCH_QUERIES` при необходимости меняются в `config.py`.
+
+```bash
+cd /opt/projects/hh-ai-agent
+cp candidate_profile.example.json candidate_profile.json
+chown hh-agent:hh-agent candidate_profile.json
+chmod 600 candidate_profile.json
+```
+
+В `candidate_profile.json` хранятся только проверенные формулировки достижений. Добавьте название текущего работодателя и его продукта в `forbidden_terms`: тогда они не попадут в письмо. Файл исключён из Git и не должен публиковаться.
 
 ## 8. Подключить Ollama с Mac
 

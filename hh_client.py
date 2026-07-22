@@ -5,6 +5,7 @@ from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 import database
 from ai_analyzer import (
+    CandidateProfileError,
     OllamaUnavailableError,
     generate_cover_letter,
     is_vacancy_suitable,
@@ -255,7 +256,7 @@ class HHClient:
                                 print(f"❌ ИИ отклонил: {title}")
                                 database.add_filtered_job(job_id, title, href)
                             
-                        except OllamaUnavailableError as e:
+                        except (OllamaUnavailableError, CandidateProfileError) as e:
                             print(f"Анализ вакансий приостановлен: {e}")
                             return
                         except Exception as e:

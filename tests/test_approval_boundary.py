@@ -63,10 +63,9 @@ class ApprovalBoundaryTest(unittest.TestCase):
     def test_ollama_outage_stops_search_without_filtering_current_job(self) -> None:
         source = async_function_source(ROOT / "hh_client.py", "search_and_queue")
 
-        self.assertIn("except OllamaUnavailableError", source)
-        outage_handler = source.split("except OllamaUnavailableError", 1)[1].split(
-            "except Exception", 1
-        )[0]
+        exception = "except (OllamaUnavailableError, CandidateProfileError)"
+        self.assertIn(exception, source)
+        outage_handler = source.split(exception, 1)[1].split("except Exception", 1)[0]
         self.assertIn("return", outage_handler)
         self.assertNotIn("add_filtered_job", outage_handler)
 
