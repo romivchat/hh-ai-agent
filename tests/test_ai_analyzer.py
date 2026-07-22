@@ -240,6 +240,27 @@ class AiAnalyzerTest(unittest.TestCase):
         self.assertNotIn("техническ", all_text)
         self.assertNotIn("управление поставщиками", all_text)
 
+    def test_hardware_requirement_cannot_match_general_delivery_fact(self) -> None:
+        profile = candidate_profile()
+        analysis = pbf_analysis()
+        analysis["matches"].append(
+            {
+                "requirement_id": "pos",
+                "status": "direct",
+                "fact_ids": ["zero_to_one"],
+            }
+        )
+        validated = ai_analyzer._validate_analysis(
+            copy.deepcopy(analysis),
+            PBF_DESCRIPTION,
+            profile,
+        )
+        match = next(
+            item for item in validated["matches"] if item["requirement_id"] == "pos"
+        )
+        self.assertEqual(match["status"], "gap")
+        self.assertEqual(match["fact_ids"], [])
+
     def test_analysis_discards_requirement_missing_from_vacancy(self) -> None:
         result = pbf_analysis()
         result["items"][0]["text"] = "Управление космическим кораблём"

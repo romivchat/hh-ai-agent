@@ -455,6 +455,18 @@ def _validate_analysis(result: dict, vacancy_description: str, profile: dict) ->
         if strict_required and not strict_required & supported_capabilities:
             match["status"] = "gap"
             match["fact_ids"] = []
+        elif (
+            "portfolio" in item["capabilities"]
+            and match["status"] == "direct"
+            and "portfolio" not in supported_capabilities
+        ):
+            match["status"] = (
+                "transferable"
+                if supported_capabilities & {"credit", "monetization"}
+                else "gap"
+            )
+            if match["status"] == "gap":
+                match["fact_ids"] = []
 
     direct_facts = {
         fact_id
@@ -516,15 +528,36 @@ def _validate_analysis(result: dict, vacancy_description: str, profile: dict) ->
         fact_scores[fact["id"]] += len(
             set(fact["domains"]) & set(selected_positioning["domains"])
         )
-    if "portfolio" in required_capabilities or "портфел" in result["role_summary"].casefold():
+    is_portfolio_role = (
+        "portfolio" in required_capabilities
+        or "портфел" in result["role_summary"].casefold()
+    )
+    if is_portfolio_role:
         for fact in profile["facts"]:
             if set(fact["capabilities"]) & {"credit", "monetization"}:
                 fact_scores[fact["id"]] += 5
     model_order = {fact_id: index for index, fact_id in enumerate(result["selected_fact_ids"])}
-    result["selected_fact_ids"] = sorted(
+    ranked_fact_ids = sorted(
         fact_ids,
         key=lambda fact_id: (-fact_scores[fact_id], model_order.get(fact_id, 99), fact_id),
-    )[:2]
+    )
+    result["selected_fact_ids"] = ranked_fact_ids[:2]
+    if is_portfolio_role:
+        credit_fact = next(
+            (fact_id for fact_id in ranked_fact_ids if "credit" in facts[fact_id]["capabilities"]),
+            None,
+        )
+        monetization_fact = next(
+            (
+                fact_id
+                for fact_id in ranked_fact_ids
+                if fact_id != credit_fact
+                and "monetization" in facts[fact_id]["capabilities"]
+            ),
+            None,
+        )
+        if credit_fact and monetization_fact:
+            result["selected_fact_ids"] = [credit_fact, monetization_fact]
     return result
 
 
@@ -593,10 +626,21 @@ def _add_deterministic_items(result: dict, description: str) -> dict:
         return result
     if isinstance(result.get("primary_goal"), dict):
         _ground_item_evidence(result["primary_goal"], description)
+        inferred = _infer_capabilities(
+            f"{result['primary_goal'].get('text', '')} {result['primary_goal'].get('evidence', '')}",
+            default=False,
+        )
+        result["primary_goal"]["capabilities"] = _deduplicate(
+            [*result["primary_goal"].get("capabilities", []), *inferred]
+        )
     for model_item in result["items"]:
         _ground_item_evidence(model_item, description)
         if isinstance(model_item, dict):
             model_text = f"{model_item.get('text', '')} {model_item.get('evidence', '')}".casefold()
+            inferred = _infer_capabilities(model_text, default=False)
+            model_item["capabilities"] = _deduplicate(
+                [*model_item.get("capabilities", []), *inferred]
+            )
             if any(marker in model_text for marker in ("английск", "english")) and any(
                 marker in model_text for marker in ("b1", "b2", "c1", "c2", "уров", "свобод")
             ):
@@ -753,7 +797,7 @@ def _add_deterministic_items(result: dict, description: str) -> dict:
     return result
 
 
-def _infer_capabilities(text: str) -> list[str]:
+def _infer_capabilities(text: str, default: bool = True) -> list[str]:
     folded = text.casefold()
     markers = {
         "portfolio": ("портфел", "portfolio"),
@@ -773,13 +817,20 @@ def _infer_capabilities(text: str) -> list[str]:
         "crm": ("crm",),
         "risk": ("риск", "risk"),
         "integrations": ("интеграц", "integration"),
+        "release_management": ("релиз", "release"),
+        "agile": ("agile", "scrum"),
+        "ci_cd": ("ci/cd", "gitlab ci", "jenkins", "gitflow", "devops"),
+        "hardware": ("pos-терминал", "платёжн", "платежн", "оборудован", "аппаратн"),
+        "suppliers": ("поставщик", "supplier"),
     }
     capabilities = [
         capability
         for capability, values in markers.items()
         if any(value in f" {folded} " for value in values)
     ]
-    return capabilities or ["strategy", "delivery"]
+    if capabilities:
+        return capabilities
+    return ["strategy", "delivery"] if default else []
 
 
 def _fallback_analysis(vacancy_title: str, vacancy_description: str, profile: dict) -> dict:
