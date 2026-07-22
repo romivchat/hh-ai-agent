@@ -1,6 +1,8 @@
 import os
 from dotenv import load_dotenv
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Загружаем переменные окружения из .env файла
 load_dotenv()
 
@@ -22,6 +24,10 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:4b-instruct")
 # Данные кандидата для сопроводительных писем
 APPLICANT_NAME = os.getenv("APPLICANT_NAME", "ИМЯ_НЕ_НАСТРОЕНО")
 GITHUB_URL = os.getenv("GITHUB_URL", "https://github.com/romivchat")
+CANDIDATE_PROFILE_PATH = os.getenv(
+    "CANDIDATE_PROFILE_PATH",
+    os.path.join(BASE_DIR, "candidate_profile.json"),
+)
 
 # HH.ru настройки
 # Ключевые слова для продуктовых вакансий
@@ -70,6 +76,8 @@ def validate_configuration() -> None:
         "ПОДРОБНОЕ_ОПИСАНИЕ_ОПЫТА_НАВЫКОВ_И_ПОЖЕЛАНИЙ",
     }:
         missing.append("MY_RESUME_SUMMARY")
+    if not os.path.isfile(CANDIDATE_PROFILE_PATH):
+        missing.append("CANDIDATE_PROFILE_PATH")
 
     if missing:
         raise RuntimeError(
