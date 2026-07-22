@@ -1,4 +1,5 @@
 import asyncio
+import html
 import json
 from collections.abc import Awaitable, Callable
 from typing import Optional
@@ -106,13 +107,21 @@ def _json_value(raw_value, default):
     return value if isinstance(value, type(default)) else default
 
 
+def _escape_text(value, limit: Optional[int] = None) -> str:
+    text = str(value or "").strip()
+    if limit and len(text) > limit:
+        text = text[: limit - 3].rstrip() + "..."
+    return html.escape(text)
+
+
 def _format_lines(title: str, values: list[str], empty: str) -> str:
     if not values:
-        return f"{title}: {empty}"
-    return title + ":\n" + "\n".join(f"• {value}" for value in values[:3])
+        return f"{html.escape(title)}: {html.escape(empty)}"
+    lines = "\n".join(f"• {_escape_text(value, 240)}" for value in values[:3])
+    return f"{html.escape(title)}:\n{lines}"
 
 
-def format_pending_job(job: dict) -> str:
+def format_pending_summary(job: dict) -> str:
     analysis = _json_value(job.get("analysis_json"), {})
     warnings = _json_value(job.get("warnings_json"), [])
     strengths = _json_value(job.get("strengths_json"), [])
@@ -120,17 +129,34 @@ def format_pending_job(job: dict) -> str:
     relevance = relevance_labels.get(analysis.get("relevance"), "Не оценена")
     goal = analysis.get("primary_goal", {}).get("text", "не определена")
     role_summary = analysis.get("role_summary")
-    role_line = f"\nФактическая роль: {role_summary}" if role_summary else ""
+    role_line = (
+        f"\nФактическая роль: {_escape_text(role_summary, 320)}"
+        if role_summary
+        else ""
+    )
     return (
-        "Найдена вакансия\n\n"
-        f"{job['title']}\n"
-        f"{job['url']}\n\n"
+        "<b>Найдена вакансия</b>\n\n"
+        f"<b>{_escape_text(job['title'], 320)}</b>\n"
+        f"{_escape_text(job['url'], 600)}\n\n"
         f"Релевантность: {relevance}{role_line}\n"
-        f"Главная задача: {goal}\n\n"
+        f"Главная задача: {_escape_text(goal, 400)}\n\n"
         f"{_format_lines('Сильные совпадения', strengths, 'не найдены')}\n\n"
-        f"{_format_lines('Предупреждения', warnings, 'нет')}\n\n"
-        "Сопроводительное письмо:\n"
-        f"{job['cover_letter']}"
+        f"{_format_lines('Предупреждения', warnings, 'нет')}"
+    )
+
+
+def format_cover_letter(cover_letter: str, continuation: bool = False) -> str:
+    heading = "Сопроводительное письмо"
+    if continuation:
+        heading += " (продолжение)"
+    letter = _escape_text(cover_letter) or "Письмо не сформировано."
+    return f"<b>{heading}</b>\n<blockquote expandable>{letter}</blockquote>"
+
+
+def format_pending_job(job: dict) -> str:
+    return (
+        f"{format_pending_summary(job)}\n\n"
+        f"{format_cover_letter(job.get('cover_letter', ''))}"
     )
 
 
@@ -149,6 +175,36 @@ def _split_message(text: str, limit: int = 4000) -> list[str]:
         parts.append(remaining[:split_at])
         remaining = remaining[split_at:]
     return parts
+
+
+def _split_for_html(text: str, escaped_limit: int) -> list[str]:
+    """Split raw text while counting its escaped HTML representation."""
+    if not text:
+        return [""]
+
+    parts: list[str] = []
+    current: list[str] = []
+    current_length = 0
+    for char in text:
+        escaped_length = len(html.escape(char))
+        if current and current_length + escaped_length > escaped_limit:
+            parts.append("".join(current))
+            current = []
+            current_length = 0
+        current.append(char)
+        current_length += escaped_length
+    if current:
+        parts.append("".join(current))
+    return parts
+
+
+def _cover_letter_messages(cover_letter: str, limit: int = 4000) -> list[str]:
+    overhead = len(format_cover_letter("", continuation=True))
+    chunks = _split_for_html(cover_letter, limit - overhead)
+    return [
+        format_cover_letter(chunk, continuation=index > 0)
+        for index, chunk in enumerate(chunks)
+    ]
 
 
 async def _get_bot() -> Optional[Bot]:
@@ -179,12 +235,32 @@ async def send_pending_vacancy(job: dict) -> None:
     if current_bot is None:
         raise RuntimeError("Telegram не настроен или бот ещё не запущен")
 
-    parts = _split_message(format_pending_job(job))
-    for index, part in enumerate(parts):
-        reply_markup = decision_keyboard(job["id"]) if index == len(parts) - 1 else None
+    message = format_pending_job(job)
+    if len(message) <= 4000:
         await current_bot.send_message(
             chat_id=TG_USER_ID,
-            text=part,
+            text=message,
+            parse_mode="HTML",
+            reply_markup=decision_keyboard(job["id"]),
+        )
+        return
+
+    await current_bot.send_message(
+        chat_id=TG_USER_ID,
+        text=format_pending_summary(job),
+        parse_mode="HTML",
+    )
+    letter_messages = _cover_letter_messages(job.get("cover_letter", ""))
+    for index, letter_message in enumerate(letter_messages):
+        reply_markup = (
+            decision_keyboard(job["id"])
+            if index == len(letter_messages) - 1
+            else None
+        )
+        await current_bot.send_message(
+            chat_id=TG_USER_ID,
+            text=letter_message,
+            parse_mode="HTML",
             reply_markup=reply_markup,
         )
 
