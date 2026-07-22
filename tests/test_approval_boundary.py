@@ -52,6 +52,14 @@ class ApprovalBoundaryTest(unittest.TestCase):
         self.assertNotIn("experience=noExperience", source)
         self.assertNotIn("experience=between1And3", source)
 
+    def test_search_rejects_sales_leadership_titles(self) -> None:
+        source = async_function_source(ROOT / "hh_client.py", "search_and_queue")
+
+        self.assertIn('"руководитель продаж"', source)
+        self.assertIn('"head of sales"', source)
+        self.assertIn('"x-sell head"', source)
+        self.assertIn('"cross-sell head"', source)
+
     def test_ollama_outage_stops_search_without_filtering_current_job(self) -> None:
         source = async_function_source(ROOT / "hh_client.py", "search_and_queue")
 

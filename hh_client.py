@@ -214,6 +214,8 @@ class HHClient:
                                 "project manager", "менеджер проектов", "scrum master",
                                 "product marketing", "маркетолог", "marketing manager",
                                 "sales manager", "менеджер по продажам", "аккаунт-менеджер",
+                                "руководитель продаж", "директор по продажам",
+                                "head of sales", "x-sell head", "cross-sell head",
                                 "бизнес-аналитик", "data analyst", "product analyst",
                                 "продуктовый аналитик", "разработчик", "developer",
                                 "дизайнер", "designer", "рекрутер", "риелтор",
