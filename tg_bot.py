@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import Awaitable, Callable
 from typing import Optional
 
@@ -13,24 +14,40 @@ from aiogram.types import (
 )
 
 import database
+from ai_analyzer import (
+    CandidateProfileError,
+    OllamaUnavailableError,
+    draft_profile_fact,
+    save_profile_fact,
+    save_profile_value,
+)
 from config import TG_BOT_TOKEN, TG_USER_ID
 
 
 ApplicationHandler = Callable[[str], Awaitable[tuple[bool, str]]]
+RegenerationHandler = Callable[[str], Awaitable[tuple[bool, str]]]
 
 dp = Dispatcher()
 bot: Optional[Bot] = None
 application_handler: Optional[ApplicationHandler] = None
+regeneration_handler: Optional[RegenerationHandler] = None
 
 captcha_event = asyncio.Event()
 captcha_solution = ""
 captcha_waiting = False
 editing_job_id: Optional[str] = None
+data_entry_state: Optional[dict] = None
+pending_profile_change: Optional[dict] = None
 
 
 def set_application_handler(handler: Optional[ApplicationHandler]) -> None:
     global application_handler
     application_handler = handler
+
+
+def set_regeneration_handler(handler: Optional[RegenerationHandler]) -> None:
+    global regeneration_handler
+    regeneration_handler = handler
 
 
 def _is_owner(user_id: Optional[int]) -> bool:
@@ -56,6 +73,11 @@ def decision_keyboard(job_id: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    text="Дополнить данные", callback_data=f"job:enrich:{job_id}"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
                     text="Пропустить навсегда", callback_data=f"job:skip:{job_id}"
                 )
             ],
@@ -63,11 +85,50 @@ def decision_keyboard(job_id: str) -> InlineKeyboardMarkup:
     )
 
 
+def profile_confirmation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Сохранить", callback_data="profile:confirm"),
+                InlineKeyboardButton(text="Отмена", callback_data="profile:cancel"),
+            ]
+        ]
+    )
+
+
+def _json_value(raw_value, default):
+    if isinstance(raw_value, type(default)):
+        return raw_value
+    try:
+        value = json.loads(raw_value or "")
+    except (json.JSONDecodeError, TypeError):
+        return default
+    return value if isinstance(value, type(default)) else default
+
+
+def _format_lines(title: str, values: list[str], empty: str) -> str:
+    if not values:
+        return f"{title}: {empty}"
+    return title + ":\n" + "\n".join(f"• {value}" for value in values[:3])
+
+
 def format_pending_job(job: dict) -> str:
+    analysis = _json_value(job.get("analysis_json"), {})
+    warnings = _json_value(job.get("warnings_json"), [])
+    strengths = _json_value(job.get("strengths_json"), [])
+    relevance_labels = {"high": "Высокая", "medium": "Средняя", "low": "Низкая"}
+    relevance = relevance_labels.get(analysis.get("relevance"), "Не оценена")
+    goal = analysis.get("primary_goal", {}).get("text", "не определена")
+    role_summary = analysis.get("role_summary")
+    role_line = f"\nФактическая роль: {role_summary}" if role_summary else ""
     return (
-        "Найдена подходящая вакансия\n\n"
+        "Найдена вакансия\n\n"
         f"{job['title']}\n"
         f"{job['url']}\n\n"
+        f"Релевантность: {relevance}{role_line}\n"
+        f"Главная задача: {goal}\n\n"
+        f"{_format_lines('Сильные совпадения', strengths, 'не найдены')}\n\n"
+        f"{_format_lines('Предупреждения', warnings, 'нет')}\n\n"
         "Сопроводительное письмо:\n"
         f"{job['cover_letter']}"
     )
@@ -227,6 +288,129 @@ async def edit_job(callback: CallbackQuery) -> None:
         )
 
 
+@dp.callback_query(F.data.startswith("job:enrich:"))
+async def enrich_job(callback: CallbackQuery) -> None:
+    global data_entry_state, pending_profile_change
+
+    if not _is_owner(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    if captcha_waiting:
+        await callback.answer("Сначала отправьте код капчи", show_alert=True)
+        return
+
+    job_id = callback.data.rsplit(":", 1)[-1]
+    job = database.get_job(job_id)
+    if not job or job["status"] != database.PENDING:
+        await callback.answer("Вакансия уже обработана", show_alert=True)
+        return
+
+    analysis = _json_value(job.get("analysis_json"), {})
+    warnings = _json_value(job.get("warnings_json"), [])
+    items = {
+        item.get("id"): item
+        for item in [analysis.get("primary_goal", {}), *analysis.get("items", [])]
+        if isinstance(item, dict) and item.get("id")
+    }
+
+    kind = "fact"
+    requirement = analysis.get("primary_goal", {}).get("text", job["title"])
+    prompt = (
+        "Опишите одним сообщением реальный опыт, который подтверждает это "
+        f"требование:\n{requirement}"
+    )
+    if any("доход" in warning.casefold() for warning in warnings):
+        kind = "compensation"
+        requirement = "зарплатные ожидания"
+        prompt = (
+            "Пришлите зарплатные ожидания в готовом виде. Например: "
+            "от 350 000 рублей на руки, окончательная сумма зависит от объёма ответственности."
+        )
+    elif any("язык" in warning.casefold() for warning in warnings):
+        kind = "english"
+        requirement = "уровень и применение английского"
+        prompt = (
+            "Пришлите подтверждённый уровень английского и как вы его используете. "
+            "Например: B2, использую для встреч и рабочей переписки."
+        )
+    else:
+        for match in analysis.get("matches", []):
+            if match.get("status") in {"gap", "unknown"}:
+                item = items.get(match.get("requirement_id"))
+                if item:
+                    requirement = item["text"]
+                    prompt = (
+                        "Опишите одним сообщением только реальный опыт по требованию:\n"
+                        f"{requirement}"
+                    )
+                    break
+
+    data_entry_state = {
+        "job_id": job_id,
+        "kind": kind,
+        "requirement": requirement,
+    }
+    pending_profile_change = None
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer(prompt)
+
+
+@dp.callback_query(F.data == "profile:confirm")
+async def confirm_profile_change(callback: CallbackQuery) -> None:
+    global pending_profile_change
+
+    if not _is_owner(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    change = pending_profile_change
+    if not change:
+        await callback.answer("Нет данных для сохранения", show_alert=True)
+        return
+
+    try:
+        if change["kind"] == "fact":
+            save_profile_fact(change["draft"])
+        else:
+            save_profile_value(change["kind"], change["value"])
+    except CandidateProfileError as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
+
+    pending_profile_change = None
+    await callback.answer("Сохранено")
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("Данные сохранены. Пересобираю письмо.")
+
+    if regeneration_handler is None:
+        if callback.message:
+            await callback.message.answer("Браузер HH ещё не готов. Используйте /pending позже.")
+        return
+    success, message = await regeneration_handler(change["job_id"])
+    if callback.message:
+        await callback.message.answer(message)
+        if success:
+            job = database.get_job(change["job_id"])
+            if job:
+                await send_pending_vacancy(job)
+
+
+@dp.callback_query(F.data == "profile:cancel")
+async def cancel_profile_change(callback: CallbackQuery) -> None:
+    global data_entry_state, pending_profile_change
+
+    if not _is_owner(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    data_entry_state = None
+    pending_profile_change = None
+    await callback.answer("Отменено")
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("Изменение данных отменено.")
+
+
 @dp.callback_query(F.data.startswith("job:skip:"))
 async def skip_job(callback: CallbackQuery) -> None:
     if not _is_owner(callback.from_user.id):
@@ -248,6 +432,7 @@ async def skip_job(callback: CallbackQuery) -> None:
 @dp.message()
 async def handle_text(message: Message) -> None:
     global captcha_solution, captcha_waiting, editing_job_id
+    global data_entry_state, pending_profile_change
 
     if not _is_owner(message.from_user.id if message.from_user else None):
         return
@@ -271,6 +456,34 @@ async def handle_text(message: Message) -> None:
         job = database.get_job(job_id)
         if job:
             await send_pending_vacancy(job)
+        return
+
+    if data_entry_state is not None:
+        state = data_entry_state
+        data_entry_state = None
+        try:
+            if state["kind"] == "fact":
+                draft = await draft_profile_fact(text, state["requirement"])
+                pending_profile_change = {
+                    **state,
+                    "draft": draft,
+                }
+                preview = (
+                    "Проверьте формулировку перед сохранением:\n\n"
+                    f"{draft['public_text']}\n\n"
+                    "Она будет доступна для будущих писем."
+                )
+            else:
+                pending_profile_change = {
+                    **state,
+                    "value": text,
+                }
+                label = "Зарплатные ожидания" if state["kind"] == "compensation" else "Английский"
+                preview = f"Проверьте перед сохранением:\n\n{label}: {text}"
+        except (OllamaUnavailableError, CandidateProfileError) as exc:
+            await message.answer(f"Не удалось подготовить данные: {exc}")
+            return
+        await message.answer(preview, reply_markup=profile_confirmation_keyboard())
         return
 
     if captcha_waiting:

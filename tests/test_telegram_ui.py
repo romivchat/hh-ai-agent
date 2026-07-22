@@ -10,11 +10,21 @@ class TelegramUiTest(unittest.TestCase):
 
         self.assertEqual(
             [button.text for button in buttons],
-            ["Откликнуться", "Изменить письмо", "Пропустить навсегда"],
+            [
+                "Откликнуться",
+                "Изменить письмо",
+                "Дополнить данные",
+                "Пропустить навсегда",
+            ],
         )
         self.assertEqual(
             [button.callback_data for button in buttons],
-            ["job:apply:123", "job:edit:123", "job:skip:123"],
+            [
+                "job:apply:123",
+                "job:edit:123",
+                "job:enrich:123",
+                "job:skip:123",
+            ],
         )
 
     def test_long_message_is_split_without_losing_text(self) -> None:
@@ -37,6 +47,27 @@ class TelegramUiTest(unittest.TestCase):
         self.assertIn("Python developer", message)
         self.assertIn("https://hh.ru/vacancy/123", message)
         self.assertIn("My letter", message)
+
+    def test_pending_message_contains_analysis_and_warnings(self) -> None:
+        message = tg_bot.format_pending_job(
+            {
+                "title": "Product Leader",
+                "url": "https://hh.ru/vacancy/123",
+                "cover_letter": "Letter",
+                "analysis_json": (
+                    '{"relevance":"medium","role_summary":"кредитный портфель",'
+                    '"primary_goal":{"text":"рост доходности портфеля"}}'
+                ),
+                "strengths_json": '["Прямой опыт: кредитные продукты"]',
+                "warnings_json": '["Нужно уточнить опыт: CRM"]',
+            }
+        )
+
+        self.assertIn("Релевантность: Средняя", message)
+        self.assertIn("Фактическая роль: кредитный портфель", message)
+        self.assertIn("Главная задача: рост доходности портфеля", message)
+        self.assertIn("Прямой опыт: кредитные продукты", message)
+        self.assertIn("Нужно уточнить опыт: CRM", message)
 
 
 if __name__ == "__main__":

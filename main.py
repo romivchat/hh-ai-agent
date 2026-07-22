@@ -5,6 +5,7 @@ from tg_bot import (
     send_notification,
     send_pending_vacancy,
     set_application_handler,
+    set_regeneration_handler,
     start_bot,
 )
 from hh_client import HHClient
@@ -21,6 +22,10 @@ async def agent_loop():
         return
 
     set_application_handler(client.apply_pending_job)
+    set_regeneration_handler(client.regenerate_pending_job)
+
+    # Один раз обновляем старые сгенерированные письма. Ручные правки защищены.
+    await client.regenerate_pending_jobs()
 
     await send_notification("🤖 ИИ-агент успешно запущен и начал работу!")
 
@@ -40,6 +45,7 @@ async def agent_loop():
             await asyncio.sleep(1800)
     finally:
         set_application_handler(None)
+        set_regeneration_handler(None)
         await client.stop()
 
 async def main():
