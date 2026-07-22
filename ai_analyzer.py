@@ -213,7 +213,8 @@ async def is_vacancy_suitable(vacancy_title: str, vacancy_description: str) -> b
 {MY_RESUME_SUMMARY}
 
 Также мне СТРОГО НЕ подходят (отклоняй сразу, отвечая NO):
-- Project Manager, менеджер проектов, Scrum Master, аккаунт-менеджер и менеджер по продажам.
+- Project Manager, менеджер проектов, Scrum Master, аккаунт-менеджер, менеджер
+  по продажам, руководитель продаж, Head of Sales, X-Sell Head и Cross-Sell Head.
 - Чисто маркетинговые, аналитические, дизайнерские, HR и инженерные роли без ответственности за продукт.
 - Стажировки и позиции Junior.
 - Роли, где нет управления цифровым продуктом, продуктовой стратегией, discovery/delivery, метриками или развитием продукта.
