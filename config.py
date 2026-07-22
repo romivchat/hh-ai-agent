@@ -20,6 +20,7 @@ HH_SUBMISSION_ENABLED = os.getenv("HH_SUBMISSION_ENABLED", "false").strip().lowe
 # Ollama (локальная модель)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:4b-instruct")
+OLLAMA_CONTEXT_LENGTH = int(os.getenv("OLLAMA_CONTEXT_LENGTH", "8192"))
 
 # Данные кандидата для сопроводительных писем
 APPLICANT_NAME = os.getenv("APPLICANT_NAME", "ИМЯ_НЕ_НАСТРОЕНО")
