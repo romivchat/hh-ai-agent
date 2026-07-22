@@ -7,8 +7,7 @@ import database
 from ai_analyzer import (
     CandidateProfileError,
     OllamaUnavailableError,
-    generate_cover_letter,
-    is_vacancy_suitable,
+    analyze_and_generate,
 )
 from config import (
     HH_SUBMISSION_ENABLED,
@@ -226,10 +225,11 @@ class HHClient:
                                 database.add_filtered_job(job_id, title, href)
                                 continue
                             
-                            # Анализ ИИ
-                            if await is_vacancy_suitable(title, description):
+                            # Один структурированный анализ используется и для
+                            # оценки релевантности, и для безопасного письма.
+                            result = await analyze_and_generate(title, description)
+                            if result["analysis"]["suitable"]:
                                 print(f"✨ Вакансия подходит: {title}")
-                                cover_letter = await generate_cover_letter(title, description)
 
                                 # На этапе поиска ничего не нажимаем: только проверяем,
                                 # что для вакансии доступен отклик, и ставим её в очередь.
@@ -239,8 +239,13 @@ class HHClient:
                                         job_id,
                                         title,
                                         href,
-                                        cover_letter,
+                                        result["cover_letter"],
                                         MAX_PENDING_JOBS,
+                                        description=description,
+                                        analysis=result["analysis"],
+                                        warnings=result["warnings"],
+                                        strengths=result["strengths"],
+                                        letter_version=result["letter_version"],
                                     )
                                     if queued:
                                         job = database.get_job(job_id)
@@ -274,6 +279,76 @@ class HHClient:
                     else:
                         print("🛑 Больше страниц нет, переходим к следующему запросу.")
                         break
+
+    async def regenerate_pending_job(
+        self,
+        job_id: str,
+        force: bool = True,
+    ) -> tuple[bool, str]:
+        job = database.get_job(job_id)
+        if not job or job["status"] != database.PENDING:
+            return False, "Вакансия уже обработана."
+        if job["letter_edited"]:
+            return False, "Письмо изменено вручную и не было перезаписано."
+        if not force and job["letter_version"] >= 2 and job["description"]:
+            return True, "Письмо уже использует новую версию."
+        if self.context is None:
+            return False, "Браузер HH ещё не готов."
+
+        page = None
+        try:
+            description = job["description"]
+            if not description:
+                page = await self.context.new_page()
+                await Stealth().apply_stealth_async(page)
+                await page.goto(job["url"])
+                await asyncio.sleep(2)
+                desc_loc = page.locator('div[data-qa="vacancy-description"]')
+                if not await desc_loc.is_visible():
+                    warning = "Вакансия недоступна: старое письмо не пересобрано."
+                    database.add_job_warning(job_id, warning)
+                    return False, warning
+                description = await desc_loc.inner_text()
+
+            result = await analyze_and_generate(job["title"], description)
+            updated = database.update_generated_job(
+                job_id,
+                description,
+                result["cover_letter"],
+                result["analysis"],
+                result["warnings"],
+                result["strengths"],
+                result["letter_version"],
+            )
+            if not updated:
+                return False, "Письмо изменено вручную или вакансия уже обработана."
+            return True, "Карточка и письмо пересобраны."
+        except (OllamaUnavailableError, CandidateProfileError) as exc:
+            warning = f"Не удалось пересобрать письмо: {exc}"
+            database.add_job_warning(job_id, warning)
+            return False, warning
+        except Exception as exc:
+            warning = f"Не удалось загрузить вакансию: {exc}"
+            database.add_job_warning(job_id, warning)
+            return False, warning
+        finally:
+            if page is not None:
+                await page.close()
+
+    async def regenerate_pending_jobs(self) -> None:
+        jobs = database.list_pending_jobs()
+        candidates = [
+            job
+            for job in jobs
+            if not job["letter_edited"]
+            and (job["letter_version"] < 2 or not job["description"])
+        ]
+        if not candidates:
+            return
+        print(f"Пересобираем старые письма: {len(candidates)}")
+        for job in candidates:
+            success, message = await self.regenerate_pending_job(job["id"], force=False)
+            print(f"{job['title']}: {message}")
 
     async def apply_pending_job(self, job_id: str) -> tuple[bool, str]:
         """Отправляет отклик только после явного нажатия кнопки в Telegram."""

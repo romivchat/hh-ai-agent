@@ -72,6 +72,43 @@ class VacancyDatabaseTest(unittest.TestCase):
         self.assertTrue(database.restore_pending_job("1"))
         self.assertEqual(database.get_job("1")["status"], database.PENDING)
 
+    def test_structured_analysis_survives_restart(self) -> None:
+        self.assertTrue(
+            database.add_pending_job(
+                "1",
+                "Product",
+                "https://hh.ru/vacancy/1",
+                "Generated letter",
+                10,
+                description="Full description",
+                analysis={"relevance": "medium"},
+                warnings=["Gap"],
+                strengths=["Direct"],
+                letter_version=2,
+            )
+        )
+        database.init_db()
+        job = database.get_job("1")
+        self.assertEqual(job["description"], "Full description")
+        self.assertIn('"relevance": "medium"', job["analysis_json"])
+        self.assertEqual(job["letter_version"], 2)
+        self.assertEqual(job["letter_edited"], 0)
+
+    def test_regeneration_never_overwrites_manual_letter(self) -> None:
+        self.assertTrue(self.add_pending(1))
+        self.assertTrue(database.update_cover_letter("1", "Manual letter"))
+        updated = database.update_generated_job(
+            "1",
+            "Description",
+            "Generated letter",
+            {"relevance": "high"},
+            [],
+            [],
+            2,
+        )
+        self.assertFalse(updated)
+        self.assertEqual(database.get_job("1")["cover_letter"], "Manual letter")
+
 
 if __name__ == "__main__":
     unittest.main()
