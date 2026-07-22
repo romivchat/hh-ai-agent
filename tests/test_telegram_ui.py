@@ -47,6 +47,29 @@ class TelegramUiTest(unittest.TestCase):
         self.assertIn("Python developer", message)
         self.assertIn("https://hh.ru/vacancy/123", message)
         self.assertIn("My letter", message)
+        self.assertIn("<blockquote expandable>My letter</blockquote>", message)
+
+    def test_pending_message_escapes_html_from_vacancy_and_letter(self) -> None:
+        message = tg_bot.format_pending_job(
+            {
+                "title": "Product <Owner> & CPO",
+                "url": "https://hh.ru/vacancy/123?a=1&b=2",
+                "cover_letter": "Опыт <6 лет> & рост",
+            }
+        )
+
+        self.assertIn("Product &lt;Owner&gt; &amp; CPO", message)
+        self.assertIn("a=1&amp;b=2", message)
+        self.assertIn("Опыт &lt;6 лет&gt; &amp; рост", message)
+
+    def test_long_cover_letter_is_split_into_valid_expandable_blocks(self) -> None:
+        messages = tg_bot._cover_letter_messages("&" * 5000)
+
+        self.assertGreater(len(messages), 1)
+        self.assertTrue(all(len(message) <= 4000 for message in messages))
+        self.assertTrue(
+            all("<blockquote expandable>" in message for message in messages)
+        )
 
     def test_pending_message_contains_analysis_and_warnings(self) -> None:
         message = tg_bot.format_pending_job(
