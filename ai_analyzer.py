@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import difflib
 import json
@@ -752,6 +753,99 @@ def _add_deterministic_items(result: dict, description: str) -> dict:
     return result
 
 
+def _infer_capabilities(text: str) -> list[str]:
+    folded = text.casefold()
+    markers = {
+        "portfolio": ("портфел", "portfolio"),
+        "credit": ("кредит", "credit"),
+        "monetization": ("доход", "монетизац", "profit", "revenue"),
+        "growth": ("рост", "growth"),
+        "retention": ("retention", "churn", "удержан"),
+        "activation": ("activation", "активац"),
+        "b2b": ("b2b", "корпоративн"),
+        "fintech": ("финтех", "банк", "платёж", "платеж"),
+        "launch": ("запуск", "с нуля", "новое направление"),
+        "strategy": ("стратег", "roadmap", "приоритет"),
+        "delivery": ("delivery", "разработ", "поставк", "релиз"),
+        "team": ("команд", "лидер", "руковод"),
+        "discovery": ("discovery", "исследован", "гипотез"),
+        "ai": (" ai ", "llm", "искусственн", "нейросет"),
+        "crm": ("crm",),
+        "risk": ("риск", "risk"),
+        "integrations": ("интеграц", "integration"),
+    }
+    capabilities = [
+        capability
+        for capability, values in markers.items()
+        if any(value in f" {folded} " for value in values)
+    ]
+    return capabilities or ["strategy", "delivery"]
+
+
+def _fallback_analysis(vacancy_title: str, vacancy_description: str, profile: dict) -> dict:
+    sentences = _description_sentences(vacancy_description)
+    if not sentences:
+        raise OllamaUnavailableError("В описании вакансии нет текста для анализа")
+    task_starts = (
+        "управ",
+        "развив",
+        "отвеч",
+        "обеспеч",
+        "формир",
+        "создав",
+        "запуск",
+    )
+
+    def sentence_score(sentence: str) -> tuple[int, int]:
+        folded = sentence.casefold().lstrip("•-— ")
+        score = 0
+        if "ключевая задач" in folded or "основная задач" in folded:
+            score += 12
+        if folded.startswith(task_starts):
+            score += 8
+        if any(marker in folded for marker in ("продукт", "стратег", "портфел", "рост", "развити")):
+            score += 4
+        if any(marker in folded for marker in ("о компании", "мы предлагаем", "условия", "требования")):
+            score -= 6
+        return score, -len(sentence)
+
+    evidence = max(sentences, key=sentence_score)
+    goal_text = evidence.strip().lstrip("•-— ").rstrip(".!?")
+    if len(goal_text) > 240:
+        goal_text = goal_text.split(";", 1)[0].strip()
+
+    title_folded = vacancy_title.casefold()
+    if any(marker in title_folded for marker in ("head of product", "cpo", "директор по продукт", "product director")):
+        role_family = "product_leadership"
+    elif "релиз" in evidence.casefold() or "release" in evidence.casefold():
+        role_family = "release_delivery"
+    else:
+        role_family = "product"
+
+    fallback = {
+        "suitable": True,
+        "role_family": role_family,
+        "role_summary": "продуктовая роль; требуется ручная проверка деталей",
+        "primary_goal": {
+            "id": "fallback_goal",
+            "kind": "task",
+            "text": goal_text,
+            "evidence": evidence,
+            "capabilities": _infer_capabilities(f"{vacancy_title} {goal_text}"),
+            "request_kind": "other",
+        },
+        "items": [],
+        "matches": [],
+        "relevance": "low",
+        "positioning_id": profile["positionings"][0]["id"],
+        "selected_fact_ids": [fact["id"] for fact in profile["facts"][:2]],
+    }
+    fallback = _add_deterministic_items(fallback, vacancy_description)
+    fallback = _validate_analysis(fallback, vacancy_description, profile)
+    fallback["fallback_used"] = True
+    return fallback
+
+
 async def analyze_vacancy(vacancy_title: str, vacancy_description: str) -> dict:
     profile = _load_candidate_profile()
     prompt = f"""
@@ -786,13 +880,20 @@ description:
                 "\nПредыдущий ответ отклонён: "
                 f"{last_error}. Исправь карточку; evidence копируй дословно."
             )
-        answer = await _ask_ollama(
-            prompt + retry_note,
-            timeout_seconds=120,
-            temperature=0.0,
-            max_output_tokens=1800,
-            response_format=_analysis_schema(profile),
-        )
+        try:
+            answer = await _ask_ollama(
+                prompt + retry_note,
+                timeout_seconds=120,
+                temperature=0.0,
+                max_output_tokens=1800,
+                response_format=_analysis_schema(profile),
+            )
+        except OllamaUnavailableError as error:
+            if attempt == 0:
+                last_error = error
+                await asyncio.sleep(5)
+                continue
+            raise
         try:
             result = json.loads(answer)
             result = _add_deterministic_items(result, vacancy_description)
@@ -801,7 +902,7 @@ description:
             last_error = OllamaUnavailableError("Ollama вернула неверный JSON анализа")
         except OllamaUnavailableError as error:
             last_error = error
-    raise last_error or OllamaUnavailableError("Ollama не смогла разобрать вакансию")
+    return _fallback_analysis(vacancy_title, vacancy_description, profile)
 
 
 def _item_map(analysis: dict) -> dict[str, dict]:
@@ -824,6 +925,11 @@ def build_warnings(analysis: dict, profile: dict) -> list[str]:
             warnings.append(f"В письме требуется указать язык, но данные не подтверждены: {item['text']}")
         elif request_kind in {"portfolio", "other"}:
             warnings.append(f"Отдельная просьба работодателя требует проверки: {item['text']}")
+
+    if analysis.get("fallback_used"):
+        warnings.append(
+            "Модель не вернула корректную карточку: выполнен упрощённый анализ, проверьте вакансию вручную."
+        )
 
     match_priority = {"language": 0, "must_have": 1, "task": 2}
     ordered_matches = sorted(

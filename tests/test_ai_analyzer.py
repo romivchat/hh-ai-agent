@@ -201,17 +201,24 @@ class AiAnalyzerTest(unittest.TestCase):
         with (
             mock.patch("ai_analyzer._load_candidate_profile", return_value=candidate_profile()),
             mock.patch("ai_analyzer._ask_ollama", side_effect=ai_analyzer.OllamaUnavailableError("offline")),
+            mock.patch("ai_analyzer.asyncio.sleep", new=mock.AsyncMock()),
         ):
             with self.assertRaises(ai_analyzer.OllamaUnavailableError):
                 asyncio.run(ai_analyzer.analyze_vacancy("Product", PBF_DESCRIPTION))
 
-    def test_analysis_rejects_unstructured_answer(self) -> None:
+    def test_analysis_uses_grounded_fallback_for_unstructured_answer(self) -> None:
         with (
             mock.patch("ai_analyzer._load_candidate_profile", return_value=candidate_profile()),
             mock.patch("ai_analyzer._ask_ollama", new=mock.AsyncMock(return_value="probably yes")),
         ):
-            with self.assertRaises(ai_analyzer.OllamaUnavailableError):
-                asyncio.run(ai_analyzer.analyze_vacancy("Product", PBF_DESCRIPTION))
+            result = asyncio.run(ai_analyzer.analyze_vacancy("Product", PBF_DESCRIPTION))
+
+        self.assertTrue(result["fallback_used"])
+        self.assertIn(
+            result["primary_goal"]["evidence"].casefold(),
+            PBF_DESCRIPTION.casefold(),
+        )
+        self.assertEqual(result["relevance"], "low")
 
     def test_pbf_analysis_separates_requirements_context_and_salary(self) -> None:
         answer = json.dumps(pbf_analysis(), ensure_ascii=False)
@@ -233,7 +240,7 @@ class AiAnalyzerTest(unittest.TestCase):
         self.assertNotIn("техническ", all_text)
         self.assertNotIn("управление поставщиками", all_text)
 
-    def test_analysis_rejects_evidence_missing_from_vacancy(self) -> None:
+    def test_analysis_discards_requirement_missing_from_vacancy(self) -> None:
         result = pbf_analysis()
         result["items"][0]["text"] = "Управление космическим кораблём"
         result["items"][0]["evidence"] = "Придуманное требование"
@@ -242,8 +249,15 @@ class AiAnalyzerTest(unittest.TestCase):
             mock.patch("ai_analyzer._load_candidate_profile", return_value=candidate_profile()),
             mock.patch("ai_analyzer._ask_ollama", new=mock.AsyncMock(return_value=answer)),
         ):
-            with self.assertRaises(ai_analyzer.OllamaUnavailableError):
-                asyncio.run(ai_analyzer.analyze_vacancy("Product", PBF_DESCRIPTION))
+            analysis = asyncio.run(
+                ai_analyzer.analyze_vacancy("Product", PBF_DESCRIPTION)
+            )
+
+        self.assertTrue(analysis["fallback_used"])
+        self.assertNotIn(
+            "космическим",
+            json.dumps(analysis, ensure_ascii=False).casefold(),
+        )
 
     def test_portfolio_letter_uses_approved_metrics_and_safe_wording(self) -> None:
         profile = candidate_profile()
