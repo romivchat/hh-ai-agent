@@ -78,12 +78,43 @@ class ApprovalBoundaryTest(unittest.TestCase):
         self.assertIn("submit_btn.click", source)
         self.assertIn("mark_job_applied", source)
         self.assertIn("restore_pending_job", source)
+        self.assertIn("_verify_application_sent", source)
+        self.assertLess(
+            source.index("_verify_application_sent"),
+            source.index("mark_job_applied"),
+        )
 
     def test_application_tries_configured_resumes_in_order(self) -> None:
         source = async_function_source(ROOT / "hh_client.py", "apply_pending_job")
 
         self.assertIn("for target_resume_name in TARGET_RESUME_NAMES", source)
         self.assertIn("selected_resume", source)
+
+    def test_application_verification_requires_visible_hh_chat(self) -> None:
+        client = HHClient()
+        verification_page = mock.AsyncMock()
+        chat_link = mock.AsyncMock()
+        chat_link.is_visible.return_value = True
+        locator = mock.Mock(first=chat_link)
+        verification_page.locator = mock.Mock(return_value=locator)
+        context = mock.Mock()
+        context.new_page = mock.AsyncMock(return_value=verification_page)
+        client.context = context
+
+        with (
+            mock.patch(
+                "hh_client.Stealth.apply_stealth_async", new=mock.AsyncMock()
+            ),
+            mock.patch("hh_client.asyncio.sleep", new=mock.AsyncMock()),
+        ):
+            confirmed = asyncio.run(
+                client._verify_application_sent("https://hh.ru/vacancy/123")
+            )
+
+        self.assertTrue(confirmed)
+        verification_page.goto.assert_awaited_once()
+        chat_link.is_visible.assert_awaited_once()
+        verification_page.close.assert_awaited_once()
 
     def test_telegram_apply_button_calls_only_configured_handler(self) -> None:
         source = async_function_source(ROOT / "tg_bot.py", "apply_job")
