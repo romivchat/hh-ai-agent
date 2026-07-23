@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from hh_client import HHClient
+from hh_client import HHClient, is_target_product_title
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,12 +61,37 @@ class ApprovalBoundaryTest(unittest.TestCase):
         self.assertNotIn("experience=between1And3", source)
 
     def test_search_rejects_sales_leadership_titles(self) -> None:
-        source = async_function_source(ROOT / "hh_client.py", "search_and_queue")
+        for title in (
+            "Руководитель продаж",
+            "Head of Sales",
+            "X-sell Head",
+            "Cross-sell Head",
+        ):
+            self.assertFalse(is_target_product_title(title), title)
 
-        self.assertIn('"руководитель продаж"', source)
-        self.assertIn('"head of sales"', source)
-        self.assertIn('"x-sell head"', source)
-        self.assertIn('"cross-sell head"', source)
+    def test_search_requires_explicit_product_role_in_title(self) -> None:
+        for title in (
+            "Senior Product Manager",
+            "FTUE Product Owner",
+            "Head of Product",
+            "CPO",
+            "Продакт-менеджер",
+            "Менеджер продукта",
+            "Руководитель направления / Владелец продукта",
+            "Руководитель группы продактов Озон Джоб",
+            "Директор Продуктовой Фабрики",
+        ):
+            self.assertTrue(is_target_product_title(title), title)
+
+        for title in (
+            "Бренд-менеджер по чаю",
+            "KYC Officer / Document Verification Specialist",
+            "DevOps-инженер Middle+/Senior",
+            "Старший аналитик в кластер Growth",
+            "Федеральный Медицинский Советник",
+            "Менеджер по продажам на маркетплейсах",
+        ):
+            self.assertFalse(is_target_product_title(title), title)
 
     def test_ollama_outage_stops_search_without_filtering_current_job(self) -> None:
         source = async_function_source(ROOT / "hh_client.py", "search_and_queue")
