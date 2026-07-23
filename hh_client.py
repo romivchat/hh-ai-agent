@@ -350,6 +350,23 @@ class HHClient:
             success, message = await self.regenerate_pending_job(job["id"], force=False)
             print(f"{job['title']}: {message}")
 
+    async def _verify_application_sent(self, job_url: str) -> bool:
+        """Confirm the response in HH instead of trusting the submit click."""
+        if self.context is None:
+            return False
+
+        verification_page = await self.context.new_page()
+        try:
+            await Stealth().apply_stealth_async(verification_page)
+            await verification_page.goto(job_url, wait_until="domcontentloaded")
+            await asyncio.sleep(3)
+            chat_link = verification_page.locator(
+                '[data-qa="vacancy-response-link-view-topic"]'
+            ).first
+            return await chat_link.is_visible()
+        finally:
+            await verification_page.close()
+
     async def apply_pending_job(self, job_id: str) -> tuple[bool, str]:
         """Отправляет отклик только после явного нажатия кнопки в Telegram."""
         if not HH_SUBMISSION_ENABLED:
@@ -434,7 +451,10 @@ class HHClient:
                     raise RuntimeError("кнопка отправки отклика не найдена")
 
                 await submit_btn.click()
-                await asyncio.sleep(2)
+                if not await self._verify_application_sent(job["url"]):
+                    raise RuntimeError(
+                        "HH не подтвердил отправку: вакансия не появилась в откликах"
+                    )
                 if not database.mark_job_applied(job_id):
                     raise RuntimeError("не удалось сохранить результат в базе")
 
