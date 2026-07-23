@@ -360,11 +360,16 @@ class HHClient:
         try:
             await Stealth().apply_stealth_async(verification_page)
             await verification_page.goto(job_url, wait_until="domcontentloaded")
-            await asyncio.sleep(3)
             chat_link = verification_page.locator(
                 '[data-qa="vacancy-response-link-view-topic"]'
             ).first
-            return await chat_link.is_visible()
+            for attempt in range(7):
+                if await chat_link.is_visible():
+                    return True
+                if attempt < 6:
+                    await asyncio.sleep(5)
+                    await verification_page.reload(wait_until="domcontentloaded")
+            return False
         finally:
             await verification_page.close()
 
