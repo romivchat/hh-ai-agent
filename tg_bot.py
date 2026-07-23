@@ -11,7 +11,9 @@ from aiogram.types import (
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     Message,
+    ReplyKeyboardMarkup,
 )
 
 import database
@@ -27,11 +29,16 @@ from config import TG_BOT_TOKEN, TG_USER_ID
 
 ApplicationHandler = Callable[[str], Awaitable[tuple[bool, str]]]
 RegenerationHandler = Callable[[str], Awaitable[tuple[bool, str]]]
+SearchHandler = Callable[[], Awaitable[tuple[bool, str]]]
+
+SEARCH_BUTTON_TEXT = "Поиск вакансий"
+PENDING_BUTTON_TEXT = "Ожидают решения"
 
 dp = Dispatcher()
 bot: Optional[Bot] = None
 application_handler: Optional[ApplicationHandler] = None
 regeneration_handler: Optional[RegenerationHandler] = None
+search_handler: Optional[SearchHandler] = None
 
 captcha_event = asyncio.Event()
 captcha_solution = ""
@@ -49,6 +56,11 @@ def set_application_handler(handler: Optional[ApplicationHandler]) -> None:
 def set_regeneration_handler(handler: Optional[RegenerationHandler]) -> None:
     global regeneration_handler
     regeneration_handler = handler
+
+
+def set_search_handler(handler: Optional[SearchHandler]) -> None:
+    global search_handler
+    search_handler = handler
 
 
 def _is_owner(user_id: Optional[int]) -> bool:
@@ -83,6 +95,20 @@ def decision_keyboard(job_id: str) -> InlineKeyboardMarkup:
                 )
             ],
         ]
+    )
+
+
+def main_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text=SEARCH_BUTTON_TEXT),
+                KeyboardButton(text=PENDING_BUTTON_TEXT),
+            ]
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Выберите действие",
     )
 
 
@@ -294,7 +320,8 @@ async def cmd_start(message: Message) -> None:
         pending_count = database.count_pending_jobs()
         await message.answer(
             "Бот запущен. Я пришлю подходящие вакансии и не буду откликаться "
-            f"без вашего решения. Сейчас ожидают решения: {pending_count}."
+            f"без вашего решения. Сейчас ожидают решения: {pending_count}.",
+            reply_markup=main_keyboard(),
         )
     else:
         user_id = message.from_user.id if message.from_user else "неизвестен"
@@ -304,11 +331,7 @@ async def cmd_start(message: Message) -> None:
         )
 
 
-@dp.message(Command("pending"))
-async def cmd_pending(message: Message) -> None:
-    if not _is_owner(message.from_user.id if message.from_user else None):
-        return
-
+async def _send_pending_jobs(message: Message) -> None:
     jobs = database.list_pending_jobs()
     if not jobs:
         await message.answer("Сейчас нет вакансий, ожидающих решения.")
@@ -317,6 +340,38 @@ async def cmd_pending(message: Message) -> None:
     await message.answer(f"Ожидают решения: {len(jobs)}")
     for job in jobs:
         await send_pending_vacancy(job)
+
+
+@dp.message(Command("pending"))
+async def cmd_pending(message: Message) -> None:
+    if not _is_owner(message.from_user.id if message.from_user else None):
+        return
+    await _send_pending_jobs(message)
+
+
+@dp.message(F.text == PENDING_BUTTON_TEXT)
+async def pending_button(message: Message) -> None:
+    if not _is_owner(message.from_user.id if message.from_user else None):
+        return
+    await _send_pending_jobs(message)
+
+
+@dp.message(F.text == SEARCH_BUTTON_TEXT)
+async def search_button(message: Message) -> None:
+    if not _is_owner(message.from_user.id if message.from_user else None):
+        return
+    if search_handler is None:
+        await message.answer("Браузер HH ещё не готов. Попробуйте немного позже.")
+        return
+
+    await message.answer("Запускаю поиск вакансий.")
+    try:
+        _, result_message = await search_handler()
+    except Exception as exc:
+        print(f"Ошибка ручного поиска вакансий: {exc}")
+        await message.answer("Поиск завершился ошибкой. Бот попробует снова позже.")
+        return
+    await message.answer(result_message)
 
 
 @dp.callback_query(F.data.startswith("job:apply:"))
@@ -569,7 +624,10 @@ async def handle_text(message: Message) -> None:
         await message.answer("Код принят, пробую ввести.")
         return
 
-    await message.answer("Используйте кнопки под вакансией или команду /pending.")
+    await message.answer(
+        "Используйте кнопки меню или кнопки под вакансией.",
+        reply_markup=main_keyboard(),
+    )
 
 
 async def start_bot() -> None:

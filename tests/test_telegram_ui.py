@@ -4,6 +4,17 @@ import tg_bot
 
 
 class TelegramUiTest(unittest.TestCase):
+    def test_main_keyboard_contains_search_and_pending_actions(self) -> None:
+        keyboard = tg_bot.main_keyboard()
+        buttons = [button for row in keyboard.keyboard for button in row]
+
+        self.assertEqual(
+            [button.text for button in buttons],
+            ["Поиск вакансий", "Ожидают решения"],
+        )
+        self.assertTrue(keyboard.resize_keyboard)
+        self.assertTrue(keyboard.is_persistent)
+
     def test_decision_keyboard_contains_required_actions(self) -> None:
         keyboard = tg_bot.decision_keyboard("123")
         buttons = [button for row in keyboard.inline_keyboard for button in row]

@@ -37,6 +37,14 @@ class ApprovalBoundaryTest(unittest.TestCase):
         self.assertNotIn("submit_btn.click", source)
         self.assertIn("add_pending_job", source)
 
+    def test_manual_and_automatic_search_share_one_lock(self) -> None:
+        source = async_function_source(ROOT / "main.py", "agent_loop")
+
+        self.assertIn("search_lock = asyncio.Lock()", source)
+        self.assertIn("search_lock.locked()", source)
+        self.assertIn("async with search_lock", source)
+        self.assertIn("set_search_handler(run_search)", source)
+
     def test_search_uses_moscow_and_remote_modes(self) -> None:
         source = async_function_source(ROOT / "hh_client.py", "search_and_queue")
 
