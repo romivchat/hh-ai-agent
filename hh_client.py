@@ -1,6 +1,7 @@
 import os
 import asyncio
 import random
+import re
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 import database
@@ -18,6 +19,56 @@ from config import (
 )
 
 STATE_FILE = os.path.join(os.path.dirname(__file__), "state.json")
+
+PRODUCT_TITLE_PATTERNS = (
+    r"\bproduct\s+(?:manager|owner|lead|leader|director|head)\b",
+    r"\b(?:head|director|chief)\s+of\s+product\b",
+    r"\bcpo\b",
+    r"\bпродакт(?:ов|а|ы|ом|[-\s](?:менеджер|оунер))?\b",
+    r"\b(?:менеджер|владелец|руководитель|директор|лидер)\b.{0,40}\bпродукт",
+    r"\bпродукт\w*\b.{0,30}\b(?:менеджер|владелец|руководитель|директор|лидер)\b",
+)
+
+EXCLUDED_TITLE_PHRASES = (
+    "junior",
+    "стажер",
+    "стажёр",
+    "intern",
+    "trainee",
+    "project manager",
+    "менеджер проектов",
+    "scrum master",
+    "product marketing",
+    "маркетолог",
+    "marketing manager",
+    "sales manager",
+    "менеджер по продажам",
+    "аккаунт-менеджер",
+    "руководитель продаж",
+    "директор по продажам",
+    "head of sales",
+    "x-sell head",
+    "cross-sell head",
+    "бизнес-аналитик",
+    "data analyst",
+    "product analyst",
+    "продуктовый аналитик",
+    "разработчик",
+    "developer",
+    "дизайнер",
+    "designer",
+    "рекрутер",
+    "риелтор",
+)
+
+
+def is_target_product_title(title: str) -> bool:
+    normalized_title = " ".join(title.casefold().replace("ё", "е").split())
+    if any(phrase in normalized_title for phrase in EXCLUDED_TITLE_PHRASES):
+        return False
+    return any(
+        re.search(pattern, normalized_title) for pattern in PRODUCT_TITLE_PATTERNS
+    )
 
 class HHClient:
     def __init__(self):
@@ -139,6 +190,11 @@ class HHClient:
                         if not job_id or database.is_job_processed(job_id):
                             # print(f"Пропускаем (уже обработано): {title}") # Раскомментировать, если нужно видеть все пропуски
                             continue
+
+                        if not is_target_product_title(title):
+                            print(f"⏩ Пропускаем (нет целевой продуктовой роли): {title}")
+                            database.add_filtered_job(job_id, title, href)
+                            continue
                     
                         print(f"👁️ Открываем вакансию: {title}")
                         page = await self.context.new_page()
@@ -208,24 +264,6 @@ class HHClient:
                                     break # В случае системной ошибки выходим, чтобы не зациклиться
                             description = await desc_loc.inner_text()
 
-                            # Базовый фильтр только для явно непродуктовых ролей.
-                            title_lower = title.lower()
-                            stop_phrases = [
-                                "junior", "стажер", "стажёр", "intern", "trainee",
-                                "project manager", "менеджер проектов", "scrum master",
-                                "product marketing", "маркетолог", "marketing manager",
-                                "sales manager", "менеджер по продажам", "аккаунт-менеджер",
-                                "руководитель продаж", "директор по продажам",
-                                "head of sales", "x-sell head", "cross-sell head",
-                                "бизнес-аналитик", "data analyst", "product analyst",
-                                "продуктовый аналитик", "разработчик", "developer",
-                                "дизайнер", "designer", "рекрутер", "риелтор",
-                            ]
-                            if any(phrase in title_lower for phrase in stop_phrases):
-                                print(f"⏩ Пропускаем (непродуктовая роль): {title}")
-                                database.add_filtered_job(job_id, title, href)
-                                continue
-                            
                             # Один структурированный анализ используется и для
                             # оценки релевантности, и для безопасного письма.
                             result = await analyze_and_generate(title, description)
