@@ -79,9 +79,15 @@ class ApprovalBoundaryTest(unittest.TestCase):
         self.assertIn("mark_job_applied", source)
         self.assertIn("restore_pending_job", source)
         self.assertIn("_verify_application_sent", source)
+        self.assertIn("_fill_screening_answers", source)
+        self.assertIn("vacancy-response-popup-form-letter-input", source)
         self.assertLess(
             source.index("_verify_application_sent"),
             source.index("mark_job_applied"),
+        )
+        self.assertLess(
+            source.index("_fill_screening_answers"),
+            source.index("submit_btn.click"),
         )
 
     def test_application_tries_configured_resumes_in_order(self) -> None:
