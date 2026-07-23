@@ -402,6 +402,14 @@ class HHClient:
                 "нужны подтверждённые ответы на вопросы работодателя:\n" + questions
             )
 
+    async def _verify_cover_letter_sent(self, textarea, submit_button) -> bool:
+        for attempt in range(6):
+            if not await textarea.is_visible() or not await submit_button.is_visible():
+                return True
+            if attempt < 5:
+                await asyncio.sleep(2)
+        return False
+
     async def apply_pending_job(self, job_id: str) -> tuple[bool, str]:
         """Отправляет отклик только после явного нажатия кнопки в Telegram."""
         if not HH_SUBMISSION_ENABLED:
@@ -484,12 +492,23 @@ class HHClient:
                 await letter_textarea.fill(job["cover_letter"])
 
                 submit_btn = page.locator(
-                    'button[data-qa*="vacancy-response-submit"]:visible'
+                    'button[data-qa*="vacancy-response-submit"]:visible, '
+                    'button[data-qa="vacancy-response-letter-submit"]:visible'
                 ).first
                 if not await submit_btn.is_visible():
                     raise RuntimeError("кнопка отправки отклика не найдена")
 
+                submit_kind = await submit_btn.get_attribute("data-qa")
                 await submit_btn.click()
+                if (
+                    submit_kind == "vacancy-response-letter-submit"
+                    and not await self._verify_cover_letter_sent(
+                        letter_textarea, submit_btn
+                    )
+                ):
+                    raise RuntimeError(
+                        "HH не подтвердил отправку сопроводительного письма"
+                    )
                 if not await self._verify_application_sent(job["url"]):
                     raise RuntimeError(
                         "HH не подтвердил отправку: вакансия не появилась в откликах"
@@ -500,6 +519,27 @@ class HHClient:
                 print(f"Отклик отправлен после подтверждения: {job['title']}")
                 return True, f"Отклик отправлен: {job['title']}"
             except Exception as exc:
+                try:
+                    application_sent = await self._verify_application_sent(job["url"])
+                except Exception as verification_error:
+                    print(
+                        "Ошибка проверки частично отправленного отклика "
+                        f"{job['title']}: {verification_error}"
+                    )
+                    application_sent = False
+
+                if application_sent and database.mark_job_applied(job_id):
+                    print(
+                        "Отклик отправлен без подтверждённого сопроводительного: "
+                        f"{job['title']}: {exc}"
+                    )
+                    return (
+                        True,
+                        f"Отклик отправлен: {job['title']}\n"
+                        "Сопроводительное письмо не подтверждено HH.\n"
+                        f"Причина: {exc}\n{job['url']}",
+                    )
+
                 database.restore_pending_job(job_id)
                 print(f"Ошибка подтверждённого отклика {job['title']}: {exc}")
                 return (

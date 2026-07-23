@@ -81,6 +81,8 @@ class ApprovalBoundaryTest(unittest.TestCase):
         self.assertIn("_verify_application_sent", source)
         self.assertIn("_fill_screening_answers", source)
         self.assertIn("vacancy-response-popup-form-letter-input", source)
+        self.assertIn("vacancy-response-letter-submit", source)
+        self.assertIn("Сопроводительное письмо не подтверждено HH", source)
         self.assertLess(
             source.index("_verify_application_sent"),
             source.index("mark_job_applied"),
@@ -147,6 +149,21 @@ class ApprovalBoundaryTest(unittest.TestCase):
         self.assertEqual(sleep.await_count, 2)
         self.assertEqual(verification_page.reload.await_count, 2)
         verification_page.close.assert_awaited_once()
+
+    def test_cover_letter_verification_waits_until_form_disappears(self) -> None:
+        client = HHClient()
+        textarea = mock.AsyncMock()
+        textarea.is_visible.side_effect = [True, True, False]
+        submit_button = mock.AsyncMock()
+        submit_button.is_visible.return_value = True
+
+        with mock.patch("hh_client.asyncio.sleep", new=mock.AsyncMock()) as sleep:
+            confirmed = asyncio.run(
+                client._verify_cover_letter_sent(textarea, submit_button)
+            )
+
+        self.assertTrue(confirmed)
+        self.assertEqual(sleep.await_count, 2)
 
     def test_telegram_apply_button_calls_only_configured_handler(self) -> None:
         source = async_function_source(ROOT / "tg_bot.py", "apply_job")
