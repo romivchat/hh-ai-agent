@@ -122,6 +122,32 @@ class ApprovalBoundaryTest(unittest.TestCase):
         chat_link.is_visible.assert_awaited_once()
         verification_page.close.assert_awaited_once()
 
+    def test_application_verification_waits_for_delayed_hh_status(self) -> None:
+        client = HHClient()
+        verification_page = mock.AsyncMock()
+        chat_link = mock.AsyncMock()
+        chat_link.is_visible.side_effect = [False, False, True]
+        locator = mock.Mock(first=chat_link)
+        verification_page.locator = mock.Mock(return_value=locator)
+        context = mock.Mock()
+        context.new_page = mock.AsyncMock(return_value=verification_page)
+        client.context = context
+
+        with (
+            mock.patch(
+                "hh_client.Stealth.apply_stealth_async", new=mock.AsyncMock()
+            ),
+            mock.patch("hh_client.asyncio.sleep", new=mock.AsyncMock()) as sleep,
+        ):
+            confirmed = asyncio.run(
+                client._verify_application_sent("https://hh.ru/vacancy/123")
+            )
+
+        self.assertTrue(confirmed)
+        self.assertEqual(sleep.await_count, 2)
+        self.assertEqual(verification_page.reload.await_count, 2)
+        verification_page.close.assert_awaited_once()
+
     def test_telegram_apply_button_calls_only_configured_handler(self) -> None:
         source = async_function_source(ROOT / "tg_bot.py", "apply_job")
 
