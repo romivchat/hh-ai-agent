@@ -254,6 +254,42 @@ def _normalise_profile(profile: dict) -> dict:
     if not isinstance(preferences, dict) or not isinstance(verified, dict):
         raise CandidateProfileError("preferences и verified должны быть объектами")
 
+    screening_answers = profile.get("screening_answers", [])
+    if not isinstance(screening_answers, list):
+        raise CandidateProfileError("screening_answers должен быть списком")
+    normalized_screening_answers = []
+    screening_answer_ids = set()
+    for item in screening_answers:
+        if not isinstance(item, dict):
+            raise CandidateProfileError("Каждый ответ работодателю должен быть объектом")
+        item_id = item.get("id")
+        question_terms = item.get("question_terms")
+        answer = item.get("answer")
+        if (
+            not isinstance(item_id, str)
+            or not item_id
+            or item_id in screening_answer_ids
+        ):
+            raise CandidateProfileError("ID ответов работодателю должны быть уникальными")
+        if not isinstance(question_terms, list) or not question_terms or any(
+            not isinstance(term, str) or not term.strip() for term in question_terms
+        ):
+            raise CandidateProfileError(
+                f"Не заполнены ключевые слова вопроса работодателя: {item_id}"
+            )
+        if not isinstance(answer, str) or not answer.strip():
+            raise CandidateProfileError(
+                f"Не заполнен ответ на вопрос работодателя: {item_id}"
+            )
+        normalized_screening_answers.append(
+            {
+                "id": item_id,
+                "question_terms": [term.strip() for term in question_terms],
+                "answer": answer.strip(),
+            }
+        )
+        screening_answer_ids.add(item_id)
+
     return {
         "schema_version": 2,
         "positionings": normalized_positionings,
@@ -261,6 +297,7 @@ def _normalise_profile(profile: dict) -> dict:
         "forbidden_terms": forbidden_terms,
         "preferences": preferences,
         "verified": verified,
+        "screening_answers": normalized_screening_answers,
     }
 
 
@@ -273,6 +310,21 @@ def _load_candidate_profile() -> dict:
     except (json.JSONDecodeError, OSError) as error:
         raise CandidateProfileError(f"Не удалось прочитать профиль: {path}") from error
     return _normalise_profile(profile)
+
+
+def _normalise_question_text(value: str) -> str:
+    return " ".join(value.casefold().replace("ё", "е").split())
+
+
+def find_screening_answer(question: str) -> str | None:
+    normalized_question = _normalise_question_text(question)
+    for item in _load_candidate_profile()["screening_answers"]:
+        terms = [
+            _normalise_question_text(term) for term in item["question_terms"]
+        ]
+        if all(term in normalized_question for term in terms):
+            return item["answer"]
+    return None
 
 
 def _analysis_schema(profile: dict) -> dict:
@@ -1277,5 +1329,33 @@ def save_profile_value(kind: str, value: str) -> None:
         profile.setdefault("verified", {})["english"] = cleaned
     else:
         raise CandidateProfileError(f"Неизвестный тип данных: {kind}")
+    profile["schema_version"] = 2
+    _write_profile(profile)
+
+
+def save_screening_answer(
+    answer_id: str,
+    question_terms: list[str],
+    answer: str,
+) -> None:
+    cleaned_id = answer_id.strip()
+    cleaned_terms = [term.strip() for term in question_terms if term.strip()]
+    cleaned_answer = answer.strip()
+    if not cleaned_id or not cleaned_terms or not cleaned_answer:
+        raise CandidateProfileError("Ответ работодателю заполнен не полностью")
+
+    profile = _raw_profile()
+    items = profile.setdefault("screening_answers", [])
+    replacement = {
+        "id": cleaned_id,
+        "question_terms": cleaned_terms,
+        "answer": cleaned_answer,
+    }
+    for index, item in enumerate(items):
+        if isinstance(item, dict) and item.get("id") == cleaned_id:
+            items[index] = replacement
+            break
+    else:
+        items.append(replacement)
     profile["schema_version"] = 2
     _write_profile(profile)

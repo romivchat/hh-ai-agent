@@ -8,6 +8,7 @@ from ai_analyzer import (
     CandidateProfileError,
     OllamaUnavailableError,
     analyze_and_generate,
+    find_screening_answer,
 )
 from config import (
     HH_SUBMISSION_ENABLED,
@@ -367,6 +368,35 @@ class HHClient:
         finally:
             await verification_page.close()
 
+    async def _fill_screening_answers(self, page) -> None:
+        missing_questions = []
+        question_blocks = page.locator('[data-qa="task-body"]')
+        for index in range(await question_blocks.count()):
+            block = question_blocks.nth(index)
+            if not await block.is_visible():
+                continue
+            question_lines = [
+                line.strip()
+                for line in (await block.inner_text()).splitlines()
+                if line.strip() and line.strip() != "Писать тут"
+            ]
+            question = " ".join(question_lines)
+            textarea = block.locator("textarea:visible").first
+            if not await textarea.is_visible():
+                missing_questions.append(question)
+                continue
+            answer = find_screening_answer(question)
+            if answer is None:
+                missing_questions.append(question)
+                continue
+            await textarea.fill(answer)
+
+        if missing_questions:
+            questions = "\n".join(f"• {question}" for question in missing_questions)
+            raise RuntimeError(
+                "нужны подтверждённые ответы на вопросы работодателя:\n" + questions
+            )
+
     async def apply_pending_job(self, job_id: str) -> tuple[bool, str]:
         """Отправляет отклик только после явного нажатия кнопки в Telegram."""
         if not HH_SUBMISSION_ENABLED:
@@ -400,6 +430,8 @@ class HHClient:
                 await asyncio.sleep(random.uniform(0.8, 1.5))
                 await apply_btn.click()
                 await asyncio.sleep(3)
+
+                await self._fill_screening_answers(page)
 
                 if TARGET_RESUME_NAMES:
                     resume_dropdown = page.locator(
@@ -435,7 +467,9 @@ class HHClient:
                     await toggle_btn.click()
                     await asyncio.sleep(1)
 
-                letter_textarea = page.locator("textarea").first
+                letter_textarea = page.locator(
+                    'textarea[data-qa="vacancy-response-popup-form-letter-input"]'
+                ).first
                 try:
                     await letter_textarea.wait_for(state="visible", timeout=3000)
                 except Exception as exc:

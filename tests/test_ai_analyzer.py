@@ -81,6 +81,7 @@ def candidate_profile() -> dict:
         "forbidden_terms": ["СЕКРЕТНЫЙ РАБОТОДАТЕЛЬ"],
         "preferences": {},
         "verified": {},
+        "screening_answers": [],
         "facts": [
             {
                 "id": "zero_to_one",
@@ -367,6 +368,43 @@ class AiAnalyzerTest(unittest.TestCase):
         self.assertIn("нельзя добавлять телефон", issues)
         self.assertTrue(any("999%" in issue for issue in issues))
         self.assertTrue(any("СЕКРЕТНЫЙ РАБОТОДАТЕЛЬ" in issue for issue in issues))
+
+    def test_screening_answer_matches_confirmed_question_terms(self) -> None:
+        profile = candidate_profile()
+        profile["screening_answers"] = [
+            {
+                "id": "compensation",
+                "question_terms": ["зарплатные ожидания"],
+                "answer": "От 450 000 рублей на руки.",
+            }
+        ]
+        with mock.patch(
+            "ai_analyzer._load_candidate_profile", return_value=profile
+        ):
+            answer = ai_analyzer.find_screening_answer(
+                "Укажите, пожалуйста, ваши зарплатные ожидания."
+            )
+
+        self.assertEqual(answer, "От 450 000 рублей на руки.")
+
+    def test_screening_answer_is_saved_privately(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "candidate_profile.json"
+            path.write_text(
+                json.dumps(candidate_profile(), ensure_ascii=False), encoding="utf-8"
+            )
+            with mock.patch.object(ai_analyzer, "CANDIDATE_PROFILE_PATH", str(path)):
+                ai_analyzer.save_screening_answer(
+                    "growth_result",
+                    ["результат роста", "гордитесь"],
+                    "Подтверждённый результат роста.",
+                )
+                answer = ai_analyzer.find_screening_answer(
+                    "Расскажите про результат роста, которым гордитесь?"
+                )
+
+            self.assertEqual(answer, "Подтверждённый результат роста.")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_profile_value_is_saved_privately(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
